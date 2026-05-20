@@ -1,0 +1,1323 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PetCam Link - スマホをペットカメラに</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdfa',
+              100: '#ccfbf1',
+              500: '#14b8a6',
+              600: '#0d9488',
+              700: '#0f766e',
+              900: '#115e59',
+            },
+            darkbg: {
+              DEFAULT: '#0f172a',
+              card: '#1e293b',
+              input: '#334155'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    /* 録画中レコーディングアニメーション */
+    @keyframes pulse-red {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .animate-pulse-red {
+      animation: pulse-red 1.5s infinite;
+    }
+    /* カスタムスクロールバー */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #1e293b;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body class="bg-darkbg text-slate-100 min-h-screen flex flex-col font-sans selection:bg-brand-500 selection:text-white">
+
+  <!-- ヘッダー -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50 px-4 py-3">
+    <div class="max-w-6xl mx-auto flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="bg-gradient-to-tr from-brand-500 to-emerald-400 p-2 rounded-xl text-darkbg shadow-lg shadow-brand-500/20">
+          <i data-lucide="camera" class="w-6 h-6"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-brand-400 to-emerald-300">
+            PetCam Link
+          </h1>
+          <p class="text-xs text-slate-400">お留守番のペットをいつでも見守り</p>
+        </div>
+      </div>
+      <div class="flex items-center space-x-2">
+        <span id="connection-status-badge" class="px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-800 text-slate-400 flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-slate-500"></span> 未接続
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <!-- メインコンテンツ -->
+  <main class="flex-1 max-w-6xl w-full mx-auto p-4 flex flex-col justify-start">
+
+    <!-- 通知エリア -->
+    <div id="toast" class="hidden fixed bottom-6 right-6 z-50 max-w-sm bg-slate-800 border-l-4 border-brand-500 p-4 rounded shadow-2xl transition-all duration-300 flex items-start gap-3">
+      <div class="text-brand-400"><i data-lucide="info" class="w-5 h-5"></i></div>
+      <div class="flex-1">
+        <p id="toast-message" class="text-sm font-medium"></p>
+      </div>
+      <button onclick="hideToast()" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-4 h-4"></i></button>
+    </div>
+
+    <!-- 1. モード選択画面 -->
+    <section id="screen-setup" class="my-auto py-8">
+      <div class="max-w-xl mx-auto text-center space-y-8">
+        <div class="space-y-3">
+          <h2 class="text-3xl font-extrabold text-white">デバイスの役割を選択</h2>
+          <p class="text-slate-400 max-w-md mx-auto">
+            1台をペットの前に置く「カメラ端（送信）」にし、もう1台を外出先から見る「モニター端（受信）」にします。
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
+          <!-- カメラ（送信側）カード -->
+          <button id="btn-select-camera" class="group relative flex flex-col items-center p-6 bg-slate-800/60 border-2 border-slate-700 rounded-2xl hover:border-brand-500/80 hover:bg-slate-800 transition-all text-left duration-300 shadow-xl">
+            <div class="bg-brand-500/10 text-brand-400 p-4 rounded-full mb-4 group-hover:scale-110 transition-transform">
+              <i data-lucide="aperture" class="w-10 h-10"></i>
+            </div>
+            <h3 class="text-lg font-bold text-white mb-2">① カメラとして使う (配信)</h3>
+            <p class="text-sm text-slate-400 text-center">
+              スマホのカメラとマイクを使って、ペットのリアルタイム映像を送信します。
+            </p>
+            <div class="mt-4 text-xs font-semibold text-brand-400 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              セットアップを開始 <i data-lucide="chevron-right" class="w-4 h-4"></i>
+            </div>
+          </button>
+
+          <!-- モニター（受信側）カード -->
+          <button id="btn-select-monitor" class="group relative flex flex-col items-center p-6 bg-slate-800/60 border-2 border-slate-700 rounded-2xl hover:border-brand-500/80 hover:bg-slate-800 transition-all text-left duration-300 shadow-xl">
+            <div class="bg-emerald-500/10 text-emerald-400 p-4 rounded-full mb-4 group-hover:scale-110 transition-transform">
+              <i data-lucide="tv" class="w-10 h-10"></i>
+            </div>
+            <h3 class="text-lg font-bold text-white mb-2">② モニターとして使う (監視)</h3>
+            <p class="text-sm text-slate-400 text-center">
+              外出先からリアルタイムで映像をチェックし、ズームや音声呼びかけを操作します。
+            </p>
+            <div class="mt-4 text-xs font-semibold text-emerald-400 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              モニターを開始 <i data-lucide="chevron-right" class="w-4 h-4"></i>
+            </div>
+          </button>
+        </div>
+
+        <!-- ルームID設定エリア -->
+        <div class="bg-slate-800/40 border border-slate-700/60 rounded-2xl p-6 max-w-md mx-auto text-left space-y-4">
+          <label class="block text-sm font-semibold text-slate-300">ルーム接続コード</label>
+          <div class="flex gap-2">
+            <input type="text" id="input-room-id" placeholder="例: room-123" class="flex-1 bg-darkbg-input border border-slate-600 rounded-xl px-4 py-2.5 text-white font-mono placeholder:text-slate-500 focus:outline-none focus:border-brand-500 transition-colors">
+            <button id="btn-generate-room" class="bg-slate-700 hover:bg-slate-600 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors flex items-center gap-1.5" title="ランダム生成">
+              <i data-lucide="shuffle" class="w-4 h-4"></i> 生成
+            </button>
+          </div>
+          <p class="text-xs text-slate-400">※ カメラとモニターで、全く同じコードを入力してください。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. カメラモード（配信用画面） -->
+    <section id="screen-camera" class="hidden grid grid-cols-1 lg:grid-cols-3 gap-6 py-4">
+      <!-- 配信映像プレビュー -->
+      <div class="lg:col-span-2 space-y-4">
+        <div class="relative bg-black rounded-2xl overflow-hidden aspect-video shadow-2xl border border-slate-800 flex items-center justify-center">
+          <!-- 実際のWebRTC送信用Canvas (ズーム処理用) もしくは Video -->
+          <video id="camera-preview" autoplay playsinline muted class="absolute inset-0 w-full h-full object-cover"></video>
+          <!-- ズームシミュレート用Canvas (隠しまたはエフェクト表示) -->
+          <canvas id="camera-zoom-canvas" class="hidden"></canvas>
+
+          <!-- 配信ステータスオーバーレイ -->
+          <div class="absolute top-4 left-4 flex gap-2">
+            <span class="px-3 py-1 text-xs font-bold rounded-full bg-red-600 text-white flex items-center gap-1.5 shadow-md">
+              <span class="w-2.5 h-2.5 rounded-full bg-white animate-pulse-red"></span> CAMERA LIVE
+            </span>
+            <span id="camera-status-connected" class="hidden px-3 py-1 text-xs font-bold rounded-full bg-brand-600 text-white flex items-center gap-1.5 shadow-md">
+              <i data-lucide="users" class="w-3.5 h-3.5"></i> 接続中
+            </span>
+          </div>
+
+          <!-- 遠隔制御表示オーバーレイ -->
+          <div class="absolute bottom-4 left-4 bg-slate-900/80 backdrop-blur px-3 py-1.5 rounded-xl text-xs space-y-1 border border-slate-700">
+            <div class="flex items-center gap-2">
+              <span class="text-slate-400">遠隔ズーム倍率:</span>
+              <span id="indicator-zoom" class="font-bold text-brand-400">1.0x</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-slate-400">マイク配信:</span>
+              <span id="indicator-mic" class="font-bold text-emerald-400">有効</span>
+            </div>
+          </div>
+
+          <!-- ローカル録画中インジケータ -->
+          <div id="camera-recording-indicator" class="hidden absolute top-4 right-4 bg-amber-600 text-white px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-md animate-pulse">
+            <i data-lucide="disc" class="w-4 h-4"></i> AUTO REC
+          </div>
+        </div>
+
+        <!-- 接続情報・操作カード -->
+        <div class="bg-darkbg-card rounded-2xl p-6 border border-slate-800 space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <p class="text-xs text-slate-400">この端末の接続コード (Room ID)</p>
+              <h4 id="display-camera-room-id" class="text-2xl font-mono font-bold text-brand-400 tracking-wider">---</h4>
+            </div>
+            <div class="flex gap-2">
+              <button id="btn-camera-mic-toggle" class="bg-slate-700 hover:bg-slate-600 p-3 rounded-xl transition-colors" title="マイクの消音">
+                <i id="icon-camera-mic" data-lucide="mic" class="w-5 h-5"></i>
+              </button>
+              <button id="btn-stop-camera" class="bg-rose-600/20 hover:bg-rose-600 text-rose-200 hover:text-white px-5 py-2.5 rounded-xl font-semibold transition-all flex items-center gap-2">
+                <i data-lucide="log-out" class="w-4 h-4"></i> 配信終了
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 録画確認・保存容量設定（カメラ側で動作） -->
+      <div class="space-y-6">
+        <!-- 録画管理パネル -->
+        <div class="bg-darkbg-card rounded-2xl p-6 border border-slate-800 space-y-6">
+          <div class="flex items-center justify-between border-b border-slate-700 pb-3">
+            <div class="flex items-center gap-2">
+              <i data-lucide="database" class="text-amber-400 w-5 h-5"></i>
+              <h3 class="text-lg font-bold text-white">自律ループ録画</h3>
+            </div>
+            <span class="text-xs bg-amber-500/10 text-amber-400 px-2.5 py-1 rounded-full font-semibold border border-amber-500/20">
+              容量制限＆自動上書き対応
+            </span>
+          </div>
+
+          <!-- 設定項目: 保存上限 -->
+          <div class="space-y-2">
+            <label class="block text-xs text-slate-400 font-semibold">最大保存容量の指定</label>
+            <div class="grid grid-cols-3 gap-2">
+              <button onclick="setStorageLimit(50)" id="btn-limit-50" class="storage-limit-btn bg-slate-700 border border-slate-600 py-2 rounded-xl text-sm font-semibold hover:bg-slate-600 transition-colors">50 MB</button>
+              <button onclick="setStorageLimit(100)" id="btn-limit-100" class="storage-limit-btn bg-slate-700 border border-slate-600 py-2 rounded-xl text-sm font-semibold hover:bg-slate-600 transition-colors">100 MB</button>
+              <button onclick="setStorageLimit(500)" id="btn-limit-500" class="storage-limit-btn bg-slate-700 border border-slate-600 py-2 rounded-xl text-sm font-semibold hover:bg-slate-600 transition-colors">500 MB</button>
+            </div>
+            <p class="text-[10px] text-slate-400">※ 指定容量を超えると、自動的に一番古い録画から上書き消去されます。</p>
+          </div>
+
+          <!-- 容量使用インジケータ -->
+          <div class="space-y-1.5">
+            <div class="flex justify-between text-xs">
+              <span class="text-slate-400">現在の使用状況:</span>
+              <span id="storage-usage-text" class="font-semibold text-slate-200">0 MB / 100 MB (0%)</span>
+            </div>
+            <div class="w-full bg-slate-700 rounded-full h-2 overflow-hidden">
+              <div id="storage-usage-bar" class="bg-amber-500 h-full w-0 transition-all duration-300"></div>
+            </div>
+          </div>
+
+          <!-- 手動録画トリガー -->
+          <div class="flex gap-2 pt-2">
+            <button id="btn-toggle-rec" class="flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 py-3 rounded-xl text-sm font-bold shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 transition-all">
+              <i data-lucide="circle" class="w-4 h-4 fill-white"></i> 録画を開始
+            </button>
+          </div>
+        </div>
+
+        <!-- 録画履歴リスト -->
+        <div class="bg-darkbg-card rounded-2xl p-6 border border-slate-800 space-y-4">
+          <div class="flex items-center justify-between border-b border-slate-700 pb-2">
+            <h4 class="text-sm font-bold text-slate-300">録画確認リスト</h4>
+            <span id="recordings-count" class="text-xs bg-slate-700 px-2 py-0.5 rounded-full text-slate-300 font-semibold">0件</span>
+          </div>
+
+          <!-- スクロール可能なビデオアーカイブ -->
+          <div id="recordings-list" class="space-y-3 max-h-64 overflow-y-auto pr-1">
+            <!-- 録画履歴がここに動的に追加される -->
+            <div class="text-center py-8 text-slate-500 text-xs">
+              <i data-lucide="video-off" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
+              録画ファイルはまだありません
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. モニターモード（監視側画面） -->
+    <section id="screen-monitor" class="hidden grid grid-cols-1 lg:grid-cols-3 gap-6 py-4">
+      <!-- 映像受信側エリア -->
+      <div class="lg:col-span-2 space-y-4">
+        <div class="relative bg-black rounded-2xl overflow-hidden aspect-video shadow-2xl border border-slate-800 flex items-center justify-center">
+          <!-- WebRTC受信映像 -->
+          <video id="monitor-video" autoplay playsinline class="w-full h-full object-cover"></video>
+
+          <!-- 接続状況インジケータ -->
+          <div class="absolute top-4 left-4 flex gap-2">
+            <span id="monitor-live-badge" class="px-3 py-1 text-xs font-bold rounded-full bg-emerald-600 text-white flex items-center gap-1.5 shadow-md">
+              <span class="w-2.5 h-2.5 rounded-full bg-white animate-pulse"></span> LIVE
+            </span>
+            <span id="monitor-zoom-badge" class="px-3 py-1 text-xs font-bold rounded-full bg-slate-900/80 backdrop-blur text-brand-400 border border-slate-700 shadow-md">
+              ZOOM: 1.0x
+            </span>
+          </div>
+
+          <!-- 音声配信状態インジケータ -->
+          <div class="absolute bottom-4 left-4 flex gap-2">
+            <span id="monitor-audio-indicator" class="px-2.5 py-1 text-xs rounded-lg bg-slate-900/80 backdrop-blur border border-slate-700 flex items-center gap-1 text-emerald-400">
+              <i data-lucide="volume-2" class="w-3.5 h-3.5"></i> カメラ音声受信中
+            </span>
+          </div>
+        </div>
+
+        <!-- リアルタイムリモートコントローラー -->
+        <div class="bg-darkbg-card rounded-2xl p-6 border border-slate-800 space-y-6">
+          <h3 class="text-lg font-bold text-white border-b border-slate-700 pb-3 flex items-center gap-2">
+            <i data-lucide="sliders" class="text-brand-400 w-5 h-5"></i> 遠隔操作パネル
+          </h3>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- 遠隔カメラズーム操作 -->
+            <div class="space-y-3 bg-slate-800/40 p-4 rounded-xl border border-slate-700">
+              <div class="flex justify-between items-center">
+                <span class="text-sm font-semibold text-slate-300 flex items-center gap-1.5">
+                  <i data-lucide="zoom-in" class="w-4 h-4 text-brand-400"></i> 遠隔ズーム操作
+                </span>
+                <span id="zoom-value" class="text-sm font-bold text-brand-400 font-mono">1.0 x</span>
+              </div>
+              <input type="range" id="slider-zoom" min="1" max="4" step="0.1" value="1" class="w-full accent-brand-500 bg-slate-700 h-2 rounded-lg cursor-pointer">
+              <div class="flex justify-between text-[10px] text-slate-400">
+                <span>標準 (1.0x)</span>
+                <span>2.0x</span>
+                <span>3.0x</span>
+                <span>最大 (4.0x)</span>
+              </div>
+            </div>
+
+            <!-- 音声コントロール（マイク/スピーカー） -->
+            <div class="space-y-3 bg-slate-800/40 p-4 rounded-xl border border-slate-700">
+              <span class="text-sm font-semibold text-slate-300 flex items-center gap-1.5">
+                <i data-lucide="mic" class="w-4 h-4 text-emerald-400"></i> 音声コミュニケーション
+              </span>
+              <div class="grid grid-cols-2 gap-2 pt-1">
+                <!-- モニター側マイク（カメラへ話しかける） -->
+                <button id="btn-monitor-mic-toggle" class="bg-slate-700 hover:bg-slate-600 p-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors">
+                  <i id="icon-monitor-mic" data-lucide="mic-off" class="w-4 h-4"></i> 話しかける
+                </button>
+                <!-- カメラ側マイク（ペットの声を聴く） -->
+                <button id="btn-monitor-speaker-toggle" class="bg-emerald-600 hover:bg-emerald-500 p-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors">
+                  <i id="icon-monitor-speaker" data-lucide="volume-2" class="w-4 h-4"></i> ペットの声を聴く
+                </button>
+              </div>
+              <p class="text-[10px] text-slate-400">※ 話しかけるボタンをONにすると、あなたの声がカメラのスピーカーから再生されます。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- モニター側設定＆遠隔録画指示 -->
+      <div class="space-y-6">
+        <!-- 遠隔録画指示 -->
+        <div class="bg-darkbg-card rounded-2xl p-6 border border-slate-800 space-y-4">
+          <div class="border-b border-slate-700 pb-3">
+            <h3 class="text-md font-bold text-white flex items-center gap-2">
+              <i data-lucide="video" class="text-amber-400 w-5 h-5"></i>
+              遠隔録画コントロール
+            </h3>
+            <p class="text-xs text-slate-400 mt-1">カメラ側のストレージに、遠隔で録画を記録させます。</p>
+          </div>
+
+          <div class="space-y-4">
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-slate-300">カメラの録画状況:</span>
+              <span id="remote-rec-status" class="px-2 py-0.5 text-xs font-bold rounded bg-slate-700 text-slate-400">停止中</span>
+            </div>
+            
+            <button id="btn-remote-rec-toggle" class="w-full bg-rose-600 hover:bg-rose-500 text-white font-bold py-3 rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg transition-colors">
+              <i id="icon-remote-rec" data-lucide="circle" class="w-4 h-4 fill-white"></i> 遠隔録画スタート
+            </button>
+          </div>
+        </div>
+
+        <!-- 接続情報・切断 -->
+        <div class="bg-darkbg-card rounded-2xl p-6 border border-slate-800 space-y-4">
+          <div>
+            <span class="text-xs text-slate-400">接続中のルーム ID</span>
+            <p id="display-monitor-room-id" class="text-lg font-mono font-bold text-slate-200">---</p>
+          </div>
+          <button id="btn-stop-monitor" class="w-full bg-slate-700 hover:bg-slate-600 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2">
+            <i data-lucide="x-circle" class="w-4 h-4"></i> 監視セッションを終了
+          </button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="bg-slate-900 border-t border-slate-800 py-6 px-4 mt-8">
+    <div class="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between text-xs text-slate-400 gap-4">
+      <p>&copy; 2026 PetCam Link. すべてのデータを端末間ローカル(P2P)および内蔵ブラウザで安全に管理。</p>
+      <div class="flex gap-4">
+        <a href="#" class="hover:text-brand-400 transition-colors">プライバシーポリシー</a>
+        <a href="#" class="hover:text-brand-400 transition-colors">ヘルプ</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ビデオ再生用モーダル -->
+  <div id="video-modal" class="hidden fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
+    <div class="bg-darkbg-card border border-slate-700 rounded-2xl max-w-2xl w-full p-4 space-y-4 shadow-2xl">
+      <div class="flex justify-between items-center">
+        <h3 id="modal-video-title" class="text-sm font-bold text-slate-200">録画ファイルの再生</h3>
+        <button onclick="closeVideoModal()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-700">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <video id="modal-video-player" controls autoplay class="w-full rounded-xl bg-black aspect-video"></video>
+      <div class="flex justify-end gap-2">
+        <a id="modal-video-download" class="bg-brand-600 hover:bg-brand-500 px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1 transition-colors" download="petcam_recording.webm">
+          <i data-lucide="download" class="w-4 h-4"></i> 保存する
+        </a>
+        <button onclick="closeVideoModal()" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-xl text-xs font-semibold transition-colors">
+          閉じる
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // --- 各種変数定義・初期設定 ---
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'petcam-link-app';
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+      apiKey: "",
+      authDomain: "demo-project.firebaseapp.com",
+      projectId: "demo-project",
+      storageBucket: "demo-project.appspot.com",
+      messagingSenderId: "12345678",
+      appId: "1:1234:web:abcd"
+    };
+
+    // Firebaseの初期化
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    let user = null;
+    let localStream = null;
+    let canvasStream = null; // ズーム加工後のストリーム
+    let peerConnection = null;
+    let zoomLevel = 1.0;
+    let isMicEnabled = true;
+
+    // 録画関連
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let isRecording = false;
+    let recordingInterval = null;
+    let storageLimitMB = 100; // デフォルト 100MB
+    let currentStorageSize = 0; // 現在の録画容量
+
+    let currentRole = null; // 'camera' or 'monitor'
+    let activeRoomId = '';
+    let dbUnsubscribe = null;
+
+    // WebRTC 設定
+    const rtcConfig = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    };
+
+    // --- UI要素取得 ---
+    const screenSetup = document.getElementById('screen-setup');
+    const screenCamera = document.getElementById('screen-camera');
+    const screenMonitor = document.getElementById('screen-monitor');
+    const inputRoomId = document.getElementById('input-room-id');
+    const btnGenerateRoom = document.getElementById('btn-generate-room');
+    const btnSelectCamera = document.getElementById('btn-select-camera');
+    const btnSelectMonitor = document.getElementById('btn-select-monitor');
+    const statusBadge = document.getElementById('connection-status-badge');
+
+    // 共通トースト
+    window.showToast = function(message, type = 'info') {
+      const toast = document.getElementById('toast');
+      const toastMsg = document.getElementById('toast-message');
+      toastMsg.innerText = message;
+      toast.classList.remove('hidden');
+      setTimeout(() => { hideToast(); }, 5000);
+    };
+
+    window.hideToast = function() {
+      document.getElementById('toast').classList.add('hidden');
+    };
+
+    // ランダムなルームIDを生成
+    btnGenerateRoom.addEventListener('click', () => {
+      const randomId = 'room-' + Math.random().toString(36).substring(2, 7);
+      inputRoomId.value = randomId;
+      showToast('接続コードを生成しました！');
+    });
+
+    // --- Firebase 認証開始 (RULE 3) ---
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth Error", err);
+        showToast("認証に失敗しました。接続に影響が出る可能性があります。");
+      }
+    };
+
+    onAuthStateChanged(auth, (usr) => {
+      user = usr;
+      if (user) {
+        console.log("Authenticated with UID:", user.uid);
+      }
+    });
+
+    // 最初に認証
+    initAuth();
+
+    // --- IndexedDB の初期設定 (録画データの自律的な保存と上書き用) ---
+    let idb = null;
+    const dbName = 'PetCamRecordingsDB';
+    const storeName = 'recordings';
+
+    const initIndexedDB = () => {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(dbName, 1);
+        request.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(storeName)) {
+            db.createObjectStore(storeName, { keyPath: 'id' });
+          }
+        };
+        request.onsuccess = (e) => {
+          idb = e.target.result;
+          resolve(idb);
+        };
+        request.onerror = (e) => reject(e);
+      });
+    };
+
+    // 録画データ（Blob）の保存
+    const saveRecording = async (blob) => {
+      if (!idb) await initIndexedDB();
+      const id = 'rec_' + Date.now();
+      const timestamp = Date.now();
+      const size = blob.size;
+
+      // 現在の総容量を確認し、容量オーバーなら古い順に削除
+      await enforceStorageLimit(size);
+
+      return new Promise((resolve, reject) => {
+        const transaction = idb.transaction([storeName], 'readwrite');
+        const store = transaction.objectStore(storeName);
+        const data = { id, timestamp, blob, size };
+        const request = store.add(data);
+        request.onsuccess = () => {
+          updateRecordingsList();
+          resolve();
+        };
+        request.onerror = (e) => reject(e);
+      });
+    };
+
+    // 全ての録画履歴を取得
+    const getAllRecordings = async () => {
+      if (!idb) await initIndexedDB();
+      return new Promise((resolve, reject) => {
+        const transaction = idb.transaction([storeName], 'readonly');
+        const store = transaction.objectStore(storeName);
+        const request = store.getAll();
+        request.onsuccess = (e) => {
+          // タイムスタンプの降順（新しい順）でソート
+          const list = e.target.result || [];
+          list.sort((a, b) => b.timestamp - a.timestamp);
+          resolve(list);
+        };
+        request.onerror = (e) => reject(e);
+      });
+    };
+
+    // 特定の録画を削除
+    window.deleteRecording = async (id) => {
+      if (!idb) await initIndexedDB();
+      return new Promise((resolve, reject) => {
+        const transaction = idb.transaction([storeName], 'readwrite');
+        const store = transaction.objectStore(storeName);
+        const request = store.delete(id);
+        request.onsuccess = () => {
+          showToast('録画データを削除しました。');
+          updateRecordingsList();
+          resolve();
+        };
+        request.onerror = (e) => reject(e);
+      });
+    };
+
+    // 保存容量制限の適用（FIFO: 古い順削除の上書き）
+    const enforceStorageLimit = async (newBlobSize) => {
+      let list = await getAllRecordings();
+      let totalSize = list.reduce((acc, cur) => acc + cur.size, 0);
+      const limitBytes = storageLimitMB * 1024 * 1024;
+
+      // タイムスタンプで昇順（古い順）にソート
+      list.sort((a, b) => a.timestamp - b.timestamp);
+
+      // 新しいデータを追加した際に容量上限を超える場合、古いものを順次消去
+      while (totalSize + newBlobSize > limitBytes && list.length > 0) {
+        const oldest = list.shift();
+        await deleteRecordingDirect(oldest.id);
+        totalSize -= oldest.size;
+        console.log(`容量制限のため古い動画を削除: ${oldest.id} (${(oldest.size / (1024 * 1024)).toFixed(1)}MB)`);
+      }
+    };
+
+    // アラート無しのダイレクト削除
+    const deleteRecordingDirect = (id) => {
+      return new Promise((resolve) => {
+        const transaction = idb.transaction([storeName], 'readwrite');
+        const store = transaction.objectStore(storeName);
+        store.delete(id).onsuccess = () => resolve();
+      });
+    };
+
+    // ストレージの進捗UI表示の更新
+    const updateStorageIndicator = async () => {
+      const list = await getAllRecordings();
+      const totalBytes = list.reduce((acc, cur) => acc + cur.size, 0);
+      const totalMB = totalBytes / (1024 * 1024);
+      currentStorageSize = totalMB;
+
+      const usagePct = Math.min(100, (totalMB / storageLimitMB) * 100);
+      
+      const usageText = document.getElementById('storage-usage-text');
+      const usageBar = document.getElementById('storage-usage-bar');
+
+      if (usageText && usageBar) {
+        usageText.innerText = `${totalMB.toFixed(1)} MB / ${storageLimitMB} MB (${usagePct.toFixed(1)}%)`;
+        usageBar.style.width = `${usagePct}%`;
+
+        // 警告カラー
+        if (usagePct > 85) {
+          usageBar.className = "bg-rose-500 h-full transition-all duration-300";
+        } else if (usagePct > 60) {
+          usageBar.className = "bg-amber-500 h-full transition-all duration-300";
+        } else {
+          usageBar.className = "bg-brand-500 h-full transition-all duration-300";
+        }
+      }
+    };
+
+    // 容量上限ボタンのアクティブ・非アクティブ
+    window.setStorageLimit = (mb) => {
+      storageLimitMB = mb;
+      document.querySelectorAll('.storage-limit-btn').forEach(btn => {
+        btn.classList.remove('bg-brand-600', 'border-brand-500', 'text-white');
+        btn.classList.add('bg-slate-700', 'border-slate-600');
+      });
+      const activeBtn = document.getElementById(`btn-limit-${mb}`);
+      if (activeBtn) {
+        activeBtn.classList.remove('bg-slate-700', 'border-slate-600');
+        activeBtn.classList.add('bg-brand-600', 'border-brand-500', 'text-white');
+      }
+      showToast(`保存容量を ${mb}MB に設定しました`);
+      updateStorageIndicator();
+    };
+
+    // 録画履歴リストUIの再描画
+    const updateRecordingsList = async () => {
+      const list = await getAllRecordings();
+      const container = document.getElementById('recordings-list');
+      const countBadge = document.getElementById('recordings-count');
+
+      if (countBadge) countBadge.innerText = `${list.length}件`;
+      if (!container) return;
+
+      if (list.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-8 text-slate-500 text-xs">
+            <i data-lucide="video-off" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
+            録画ファイルはまだありません
+          </div>
+        `;
+        lucide.createIcons();
+        updateStorageIndicator();
+        return;
+      }
+
+      container.innerHTML = list.map(item => {
+        const date = new Date(item.timestamp).toLocaleTimeString();
+        const dateStr = new Date(item.timestamp).toLocaleDateString();
+        const sizeMB = (item.size / (1024 * 1024)).toFixed(1);
+        return `
+          <div class="flex items-center justify-between p-3 bg-slate-800/80 rounded-xl border border-slate-700/60 hover:border-slate-600 transition-colors">
+            <div class="flex items-center gap-3">
+              <div class="bg-brand-500/10 text-brand-400 p-2.5 rounded-lg">
+                <i data-lucide="video" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <p class="text-xs font-bold text-white">${dateStr} ${date}</p>
+                <p class="text-[10px] text-slate-400">容量: ${sizeMB} MB</p>
+              </div>
+            </div>
+            <div class="flex gap-1.5">
+              <button onclick="playVideo('${item.id}')" class="bg-brand-600 hover:bg-brand-500 p-2 rounded-lg text-white transition-colors" title="再生">
+                <i data-lucide="play" class="w-3.5 h-3.5 fill-white"></i>
+              </button>
+              <button onclick="deleteRecording('${item.id}')" class="bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white p-2 rounded-lg transition-colors" title="削除">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      lucide.createIcons();
+      updateStorageIndicator();
+    };
+
+    // 録画再生モーダル起動
+    window.playVideo = async (id) => {
+      if (!idb) await initIndexedDB();
+      const transaction = idb.transaction([storeName], 'readonly');
+      const store = transaction.objectStore(storeName);
+      store.get(id).onsuccess = (e) => {
+        const item = e.target.result;
+        if (!item) return;
+
+        const videoUrl = URL.createObjectURL(item.blob);
+        const player = document.getElementById('modal-video-player');
+        const modal = document.getElementById('video-modal');
+        const downloadBtn = document.getElementById('modal-video-download');
+        const title = document.getElementById('modal-video-title');
+
+        player.src = videoUrl;
+        title.innerText = `録画: ${new Date(item.timestamp).toLocaleString()}`;
+        downloadBtn.href = videoUrl;
+        downloadBtn.download = `petcam_${item.id}.webm`;
+
+        modal.classList.remove('hidden');
+      };
+    };
+
+    window.closeVideoModal = () => {
+      const modal = document.getElementById('video-modal');
+      const player = document.getElementById('modal-video-player');
+      player.pause();
+      player.src = "";
+      modal.classList.add('hidden');
+    };
+
+    // --- カメラズーム機能の実装 (Canvasを介したストリームズーム加工) ---
+    // 非対応機種やどのようなWebRTC受信環境でもカメラ側でリアルタイムにデジタルズームした映像を送信可能にする手法
+    const setupZoomProcessing = (videoEl, canvasEl) => {
+      const ctx = canvasEl.getContext('2d');
+      const fps = 30;
+
+      const processFrame = () => {
+        if (!currentRole || currentRole !== 'camera') return;
+        if (videoEl.paused || videoEl.ended) {
+          requestAnimationFrame(processFrame);
+          return;
+        }
+
+        // Canvasサイズをビデオ入力に合わせる
+        if (canvasEl.width !== videoEl.videoWidth && videoEl.videoWidth > 0) {
+          canvasEl.width = videoEl.videoWidth;
+          canvasEl.height = videoEl.videoHeight;
+        }
+
+        const w = canvasEl.width;
+        const h = canvasEl.height;
+
+        if (w > 0 && h > 0) {
+          // ズームに応じた描画位置/サイズの算出
+          // zoomLevel = 1.0 の場合は全体を描画
+          const subW = w / zoomLevel;
+          const subH = h / zoomLevel;
+          const sx = (w - subW) / 2;
+          const sy = (h - subH) / 2;
+
+          ctx.clearRect(0, 0, w, h);
+          ctx.drawImage(videoEl, sx, sy, subW, subH, 0, 0, w, h);
+        }
+
+        setTimeout(processFrame, 1000 / fps);
+      };
+
+      // ビデオ読み込み開始と同時に開始
+      videoEl.addEventListener('play', () => {
+        processFrame();
+      });
+    };
+
+    // ズーム値を変更
+    const applyZoom = (val) => {
+      zoomLevel = parseFloat(val);
+      const indicator = document.getElementById('indicator-zoom');
+      if (indicator) indicator.innerText = `${zoomLevel.toFixed(1)}x`;
+
+      const monitorBadge = document.getElementById('monitor-zoom-badge');
+      if (monitorBadge) monitorBadge.innerText = `ZOOM: ${zoomLevel.toFixed(1)}x`;
+    };
+
+
+    // --- 録画録音ロジック ---
+    const startLocalRecording = () => {
+      if (isRecording) return;
+      recordedChunks = [];
+
+      // ズーム処理されたCanvasストリームを録画（映像＋音声）
+      let recordStream = new MediaStream();
+
+      if (canvasStream) {
+        canvasStream.getVideoTracks().forEach(t => recordStream.addTrack(t));
+      } else if (localStream) {
+        localStream.getVideoTracks().forEach(t => recordStream.addTrack(t));
+      }
+
+      if (localStream && localStream.getAudioTracks().length > 0) {
+        localStream.getAudioTracks().forEach(t => recordStream.addTrack(t));
+      }
+
+      try {
+        mediaRecorder = new MediaRecorder(recordStream, { mimeType: 'video/webm;codecs=vp8,opus' });
+      } catch (e) {
+        // フォールバック
+        mediaRecorder = new MediaRecorder(recordStream);
+      }
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          recordedChunks.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(recordedChunks, { type: 'video/webm' });
+        await saveRecording(blob);
+        showToast('自動ループストレージへ録画を保存しました。');
+      };
+
+      mediaRecorder.start();
+      isRecording = true;
+
+      // UI 更新
+      const indicator = document.getElementById('camera-recording-indicator');
+      if (indicator) indicator.classList.remove('hidden');
+      const recBtn = document.getElementById('btn-toggle-rec');
+      if (recBtn) {
+        recBtn.innerHTML = `<i data-lucide="square" class="w-4 h-4 fill-white"></i> 録画を停止`;
+        recBtn.className = "flex-1 bg-red-600 hover:bg-red-700 py-3 rounded-xl text-sm font-bold shadow-lg shadow-red-500/20 flex items-center justify-center gap-2 transition-all";
+      }
+      lucide.createIcons();
+    };
+
+    const stopLocalRecording = () => {
+      if (!isRecording) return;
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+      }
+      isRecording = false;
+
+      // UI 更新
+      const indicator = document.getElementById('camera-recording-indicator');
+      if (indicator) indicator.classList.add('hidden');
+      const recBtn = document.getElementById('btn-toggle-rec');
+      if (recBtn) {
+        recBtn.innerHTML = `<i data-lucide="circle" class="w-4 h-4 fill-white"></i> 録画を開始`;
+        recBtn.className = "flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 py-3 rounded-xl text-sm font-bold shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 transition-all";
+      }
+      lucide.createIcons();
+    };
+
+    // 録画ボタン操作
+    const btnToggleRec = document.getElementById('btn-toggle-rec');
+    if (btnToggleRec) {
+      btnToggleRec.addEventListener('click', () => {
+        if (isRecording) {
+          stopLocalRecording();
+        } else {
+          startLocalRecording();
+        }
+      });
+    }
+
+
+    // --- ① カメラ配信モード開始処理 ---
+    const startCameraMode = async (roomId) => {
+      currentRole = 'camera';
+      activeRoomId = roomId;
+
+      // UI切り替え
+      screenSetup.classList.add('hidden');
+      screenCamera.classList.remove('hidden');
+      document.getElementById('display-camera-room-id').innerText = roomId;
+
+      statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> 配信待機中`;
+      statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1.5";
+
+      try {
+        // メディアの取得 (ズームを効かせるため背面・高解像度が望ましい)
+        localStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: true
+        });
+
+        const previewEl = document.getElementById('camera-preview');
+        previewEl.srcObject = localStream;
+
+        // ズーム処理Canvasの適用
+        const zoomCanvas = document.getElementById('camera-zoom-canvas');
+        setupZoomProcessing(previewEl, zoomCanvas);
+        canvasStream = zoomCanvas.captureStream(30);
+
+        // Firestoreのドキュメント作成/更新
+        const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId);
+        await setDoc(roomRef, {
+          createdAt: Date.now(),
+          controls: {
+            zoom: 1.0,
+            micEnabled: true,
+            isRecording: false
+          },
+          offer: null,
+          answer: null,
+          candidates: []
+        });
+
+        // 録画初期化
+        await initIndexedDB();
+        setStorageLimit(100);
+        updateRecordingsList();
+
+        // 遠隔操作を監視
+        listenToRemoteControls(roomId);
+
+        showToast("配信を開始しました。モニター端末を接続してください。");
+      } catch (err) {
+        console.error("Camera Init Error:", err);
+        showToast("カメラデバイスまたはマイクの接続に失敗しました。アクセスを許可してください。");
+        stopCameraMode();
+      }
+    };
+
+    const stopCameraMode = async () => {
+      stopLocalRecording();
+      if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+      }
+      if (peerConnection) {
+        peerConnection.close();
+      }
+      if (dbUnsubscribe) {
+        dbUnsubscribe();
+      }
+
+      screenCamera.classList.add('hidden');
+      screenSetup.classList.remove('hidden');
+
+      statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-slate-500"></span> 未接続`;
+      statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-800 text-slate-400 flex items-center gap-1.5";
+      currentRole = null;
+    };
+
+    document.getElementById('btn-stop-camera').addEventListener('click', stopCameraMode);
+
+
+    // --- ② モニター監視モード開始処理 ---
+    const startMonitorMode = async (roomId) => {
+      currentRole = 'monitor';
+      activeRoomId = roomId;
+
+      // UI切り替え
+      screenSetup.classList.add('hidden');
+      screenMonitor.classList.remove('hidden');
+      document.getElementById('display-monitor-room-id').innerText = roomId;
+
+      statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> モニタリング中`;
+      statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5";
+
+      try {
+        // カメラマイクの取得（モニター側からカメラへ喋るため）
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        } catch (e) {
+          console.log("モニター側マイクなしで起動します。");
+          localStream = null;
+        }
+
+        // WebRTC ピアコネクション初期化
+        await initializePeerConnection(roomId);
+
+        // 遠隔コントロール同期の監視
+        listenToRemoteControls(roomId);
+
+        showToast("監視ルームに参加しました。接続中...");
+      } catch (err) {
+        console.error("Monitor Init Error:", err);
+        showToast("接続に失敗しました。ルームIDが合っているか確認してください。");
+        stopMonitorMode();
+      }
+    };
+
+    const stopMonitorMode = () => {
+      if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+      }
+      if (peerConnection) {
+        peerConnection.close();
+      }
+      if (dbUnsubscribe) {
+        dbUnsubscribe();
+      }
+
+      screenMonitor.classList.add('hidden');
+      screenSetup.classList.remove('hidden');
+
+      statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-slate-500"></span> 未接続`;
+      statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-800 text-slate-400 flex items-center gap-1.5";
+      currentRole = null;
+    };
+
+    document.getElementById('btn-stop-monitor').addEventListener('click', stopMonitorMode);
+
+
+    // --- WebRTC シグナリング & 同期処理 ---
+    const initializePeerConnection = async (roomId) => {
+      peerConnection = new RTCPeerConnection(rtcConfig);
+
+      // モニター側の音声トラックを送信登録 (ミュート状態から開始)
+      if (localStream) {
+        localStream.getTracks().forEach(track => {
+          track.enabled = false; // 最初はオフ
+          peerConnection.addTrack(track, localStream);
+        });
+      }
+
+      // 相手からのストリーム受信
+      peerConnection.ontrack = (event) => {
+        const remoteVideo = document.getElementById('monitor-video');
+        if (remoteVideo && event.streams[0]) {
+          remoteVideo.srcObject = event.streams[0];
+          console.log("リモートストリームを受信しました");
+          document.getElementById('camera-status-connected')?.classList.remove('hidden');
+        }
+      };
+
+      // ICE Candidates の収集と送信
+      peerConnection.onicecandidate = async (event) => {
+        if (event.candidate) {
+          const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId);
+          const roomSnap = await getDoc(roomRef);
+          if (roomSnap.exists()) {
+            const data = roomSnap.data();
+            const candidates = data.candidates || [];
+            candidates.push(event.candidate.toJSON());
+            await updateDoc(roomRef, { candidates });
+          }
+        }
+      };
+
+      // オファーを作成して接続開始
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+
+      const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId);
+      await updateDoc(roomRef, {
+        offer: {
+          type: offer.type,
+          sdp: offer.sdp
+        }
+      });
+    };
+
+    // 接続の成立と同期（Firestore Listeners）
+    const listenToRemoteControls = (roomId) => {
+      const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId);
+
+      dbUnsubscribe = onSnapshot(roomRef, async (snapshot) => {
+        if (!snapshot.exists()) return;
+        const data = snapshot.data();
+
+        // ---- ① カメラ側のWebRTC処理 ----
+        if (currentRole === 'camera') {
+          // モニターからオファーがあった場合
+          if (data.offer && !peerConnection) {
+            peerConnection = new RTCPeerConnection(rtcConfig);
+
+            // カメラ側映像(ズーム加工後)と音声をピアに提供
+            if (canvasStream) {
+              canvasStream.getVideoTracks().forEach(track => peerConnection.addTrack(track, canvasStream));
+            }
+            if (localStream) {
+              localStream.getAudioTracks().forEach(track => peerConnection.addTrack(track, localStream));
+            }
+
+            // ICE 収集
+            peerConnection.onicecandidate = async (event) => {
+              if (event.candidate) {
+                const snap = await getDoc(roomRef);
+                const candidates = snap.data().candidates || [];
+                candidates.push(event.candidate.toJSON());
+                await updateDoc(roomRef, { candidates });
+              }
+            };
+
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+
+            await updateDoc(roomRef, {
+              answer: {
+                type: answer.type,
+                sdp: answer.sdp
+              }
+            });
+
+            // 接続状態バッジ変更
+            document.getElementById('camera-status-connected').classList.remove('hidden');
+            statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 接続完了`;
+            statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5";
+          }
+
+          // 相手のICE Candidatesを適用
+          if (data.candidates && peerConnection) {
+            for (const cand of data.candidates) {
+              try {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(cand));
+              } catch (e) {
+                // ICE Candidate 適用時エラーは無視して良い場合が多い
+              }
+            }
+          }
+
+          // リモートズーム指示の反映
+          if (data.controls && typeof data.controls.zoom !== 'undefined') {
+            applyZoom(data.controls.zoom);
+          }
+
+          // 遠隔録画指示の反映
+          if (data.controls && typeof data.controls.isRecording !== 'undefined') {
+            if (data.controls.isRecording && !isRecording) {
+              startLocalRecording();
+            } else if (!data.controls.isRecording && isRecording) {
+              stopLocalRecording();
+            }
+          }
+        }
+
+        // ---- ② モニター側のWebRTC・UI処理 ----
+        if (currentRole === 'monitor') {
+          // 相手がアンサーを返した場合
+          if (data.answer && peerConnection && !peerConnection.currentRemoteDescription) {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+            statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 接続中`;
+          }
+
+          // カメラ側のICE Candidateを反映
+          if (data.candidates && peerConnection) {
+            for (const cand of data.candidates) {
+              try {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(cand));
+              } catch (e) {}
+            }
+          }
+
+          // カメラ側の録画状態のUI同期
+          const recStatusEl = document.getElementById('remote-rec-status');
+          const remoteRecBtn = document.getElementById('btn-remote-rec-toggle');
+          const recIcon = document.getElementById('icon-remote-rec');
+
+          if (data.controls && typeof data.controls.isRecording !== 'undefined') {
+            if (data.controls.isRecording) {
+              recStatusEl.innerText = "録画中";
+              recStatusEl.className = "px-2 py-0.5 text-xs font-bold rounded bg-red-600/20 text-red-400 border border-red-500/20";
+              remoteRecBtn.className = "w-full bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-3 rounded-xl text-sm flex items-center justify-center gap-2 transition-colors";
+              remoteRecBtn.innerHTML = `<i data-lucide="square" class="w-4 h-4 fill-white text-red-500"></i> 遠隔録画を停止`;
+            } else {
+              recStatusEl.innerText = "停止中";
+              recStatusEl.className = "px-2 py-0.5 text-xs font-bold rounded bg-slate-700 text-slate-400";
+              remoteRecBtn.className = "w-full bg-rose-600 hover:bg-rose-500 text-white font-bold py-3 rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg transition-colors";
+              remoteRecBtn.innerHTML = `<i data-lucide="circle" class="w-4 h-4 fill-white"></i> 遠隔録画スタート`;
+            }
+            lucide.createIcons();
+          }
+        }
+      }, (error) => {
+        console.error("Firestore Listen Error:", error);
+      });
+    };
+
+    // --- 各種操作系イベントリスナー ---
+
+    // モード選択後の遷移
+    btnSelectCamera.addEventListener('click', () => {
+      const roomId = inputRoomId.value.trim();
+      if (!roomId) {
+        showToast("接続コード(Room ID)を入力するか生成してください。");
+        return;
+      }
+      startCameraMode(roomId);
+    });
+
+    btnSelectMonitor.addEventListener('click', () => {
+      const roomId = inputRoomId.value.trim();
+      if (!roomId) {
+        showToast("接続コード(Room ID)を入力してください。");
+        return;
+      }
+      startMonitorMode(roomId);
+    });
+
+    // モニター側: 遠隔ズームスライダー操作
+    const sliderZoom = document.getElementById('slider-zoom');
+    if (sliderZoom) {
+      sliderZoom.addEventListener('input', async (e) => {
+        const val = e.target.value;
+        const zoomValDisp = document.getElementById('zoom-value');
+        if (zoomValDisp) zoomValDisp.innerText = `${parseFloat(val).toFixed(1)} x`;
+
+        if (currentRole === 'monitor' && activeRoomId) {
+          const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', activeRoomId);
+          await updateDoc(roomRef, {
+            'controls.zoom': parseFloat(val)
+          });
+        }
+      });
+    }
+
+    // モニター側: 話しかけるマイクON/OFF
+    const btnMonitorMic = document.getElementById('btn-monitor-mic-toggle');
+    let monitorMicOn = false;
+    if (btnMonitorMic) {
+      btnMonitorMic.addEventListener('click', () => {
+        if (!localStream) {
+          showToast("この端末では音声入力が許可されていない、もしくはマイクがありません。");
+          return;
+        }
+        monitorMicOn = !monitorMicOn;
+        localStream.getAudioTracks().forEach(t => t.enabled = monitorMicOn);
+
+        const icon = document.getElementById('icon-monitor-mic');
+        if (monitorMicOn) {
+          btnMonitorMic.className = "bg-brand-600 hover:bg-brand-500 p-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 text-white transition-colors";
+          btnMonitorMic.innerHTML = `<i id="icon-monitor-mic" data-lucide="mic" class="w-4 h-4"></i> 話しかけ中...`;
+          showToast("マイクが有効です。ペットに語りかけることができます。");
+        } else {
+          btnMonitorMic.className = "bg-slate-700 hover:bg-slate-600 p-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 text-slate-300 transition-colors";
+          btnMonitorMic.innerHTML = `<i id="icon-monitor-mic" data-lucide="mic-off" class="w-4 h-4"></i> 話しかける`;
+        }
+        lucide.createIcons();
+      });
+    }
+
+    // モニター側: 声を聴くON/OFF
+    const btnMonitorSpeaker = document.getElementById('btn-monitor-speaker-toggle');
+    let monitorSpeakerOn = true;
+    if (btnMonitorSpeaker) {
+      btnMonitorSpeaker.addEventListener('click', () => {
+        const remoteVideo = document.getElementById('monitor-video');
+        if (!remoteVideo) return;
+
+        monitorSpeakerOn = !monitorSpeakerOn;
+        remoteVideo.muted = !monitorSpeakerOn;
+
+        if (monitorSpeakerOn) {
+          btnMonitorSpeaker.className = "bg-emerald-600 hover:bg-emerald-500 p-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors";
+          btnMonitorSpeaker.innerHTML = `<i data-lucide="volume-2" class="w-4 h-4"></i> ペットの声を聴く`;
+          document.getElementById('monitor-audio-indicator').classList.remove('hidden');
+        } else {
+          btnMonitorSpeaker.className = "bg-slate-700 hover:bg-slate-600 p-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors";
+          btnMonitorSpeaker.innerHTML = `<i data-lucide="volume-x" class="w-4 h-4"></i> 音声ミュート中`;
+          document.getElementById('monitor-audio-indicator').classList.add('hidden');
+        }
+        lucide.createIcons();
+      });
+    }
+
+    // モニター側: 遠隔録画の切り替え指示
+    const btnRemoteRec = document.getElementById('btn-remote-rec-toggle');
+    if (btnRemoteRec) {
+      btnRemoteRec.addEventListener('click', async () => {
+        if (currentRole !== 'monitor' || !activeRoomId) return;
+
+        const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', activeRoomId);
+        const snap = await getDoc(roomRef);
+        if (snap.exists()) {
+          const data = snap.data();
+          const nextRecState = !(data.controls?.isRecording || false);
+
+          await updateDoc(roomRef, {
+            'controls.isRecording': nextRecState
+          });
+
+          showToast(nextRecState ? "カメラ端末に録画開始を指示しました。" : "カメラ端末に録画停止を指示しました。");
+        }
+      });
+    }
+
+    // カメラ側: マイクのミュート切り替え
+    const btnCameraMic = document.getElementById('btn-camera-mic-toggle');
+    if (btnCameraMic) {
+      btnCameraMic.addEventListener('click', () => {
+        if (!localStream) return;
+        isMicEnabled = !isMicEnabled;
+        localStream.getAudioTracks().forEach(t => t.enabled = isMicEnabled);
+
+        const icon = document.getElementById('icon-camera-mic');
+        const indicator = document.getElementById('indicator-mic');
+
+        if (isMicEnabled) {
+          btnCameraMic.className = "bg-slate-700 hover:bg-slate-600 p-3 rounded-xl transition-colors";
+          btnCameraMic.innerHTML = `<i id="icon-camera-mic" data-lucide="mic" class="w-5 h-5 text-white"></i>`;
+          indicator.innerText = "有効";
+          indicator.className = "font-bold text-emerald-400";
+        } else {
+          btnCameraMic.className = "bg-rose-600 p-3 rounded-xl transition-colors";
+          btnCameraMic.innerHTML = `<i id="icon-camera-mic" data-lucide="mic-off" class="w-5 h-5 text-white"></i>`;
+          indicator.innerText = "ミュート中";
+          indicator.className = "font-bold text-rose-400";
+        }
+        lucide.createIcons();
+      });
+    }
+
+  </script>
+  <script>
+    // Lucideアイコンの初期化
+    lucide.createIcons();
+  </script>
+</body>
+</html>
