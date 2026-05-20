@@ -150,7 +150,7 @@
         <div class="relative bg-black rounded-2xl overflow-hidden aspect-video shadow-2xl border border-slate-800 flex items-center justify-center">
           <!-- 実際のWebRTC送信用Canvas (ズーム処理用) もしくは Video -->
           <video id="camera-preview" autoplay playsinline muted class="absolute inset-0 w-full h-full object-cover"></video>
-          <!-- ズームシミュレート用Canvas (隠しまたはエフェクト表示) -->
+          <!-- ズームシミュレート用Canvas -->
           <canvas id="camera-zoom-canvas" class="hidden"></canvas>
 
           <!-- 配信ステータスオーバーレイ -->
@@ -253,7 +253,6 @@
 
           <!-- スクロール可能なビデオアーカイブ -->
           <div id="recordings-list" class="space-y-3 max-h-64 overflow-y-auto pr-1">
-            <!-- 録画履歴がここに動的に追加される -->
             <div class="text-center py-8 text-slate-500 text-xs">
               <i data-lucide="video-off" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
               録画ファイルはまだありません
@@ -412,7 +411,7 @@
 
     // --- 各種変数定義・初期設定 ---
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'petcam-link-app';
-    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+    const firebaseConfig = {
     apiKey: "AIzaSyCk2JY_lKdk6653fhGPuoSC_zLbpXNYvSI",
     authDomain: "petcamera-f44aa.firebaseapp.com",
     projectId: "petcamera-f44aa",
@@ -425,6 +424,7 @@
     // Firebaseの安全な初期化
     let app, auth, db;
     let firebaseInitialized = false;
+    let authPromise = null;
 
     try {
       if (firebaseConfig && firebaseConfig.apiKey && firebaseConfig.apiKey !== "") {
@@ -434,10 +434,10 @@
         firebaseInitialized = true;
         console.log("Firebase initialized successfully.");
       } else {
-        console.warn("Firebase config elements are missing or empty. Running in Safe Demo/Local mode.");
+        console.warn("Firebase config elements are missing or empty. Running in Local Signalling mode.");
       }
     } catch (e) {
-      console.error("Firebase initialisation failed. Safe fallback mode enabled:", e);
+      console.error("Firebase initialisation failed:", e);
     }
 
     let user = null;
@@ -458,11 +458,18 @@
     let activeRoomId = '';
     let dbUnsubscribe = null;
 
-    // WebRTC 設定
+    // ICE Candidatesの重複処理を防ぐためのインデックス管理
+    let appliedCandidatesIndex = 0;
+
+    // ローカルタブ間・安全テスト用シグナリング通信 (BroadcastChannel)
+    let localChannel = null;
+
+    // WebRTC 設定 (STUNサーバー)
     const rtcConfig = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' }
       ]
     };
 
@@ -503,29 +510,38 @@
       });
     }
 
-    // --- Firebase 認証開始 (RULE 3 - 堅牢なガード付き) ---
-    const initAuth = async () => {
-      if (!firebaseInitialized || !auth) return;
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
+    // --- Firebase 認証同期 (RULE 3 - 徹底保証) ---
+    const initAuth = () => {
+      if (!firebaseInitialized || !auth) return Promise.resolve(null);
+      if (authPromise) return authPromise;
+
+      authPromise = new Promise(async (resolve, reject) => {
+        try {
+          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            const cred = await signInWithCustomToken(auth, __initial_auth_token);
+            user = cred.user;
+          } else {
+            const cred = await signInAnonymously(auth);
+            user = cred.user;
+          }
+          console.log("Firebase Auth established:", user.uid);
+          resolve(user);
+        } catch (err) {
+          console.error("Auth Error", err);
+          window.showToast("認証に失敗しました。ローカルモードで続行します。");
+          resolve(null);
         }
-      } catch (err) {
-        console.error("Auth Error", err);
-        window.showToast("認証に失敗しました。ローカルモードで動作します。");
-      }
+      });
+      return authPromise;
     };
 
     if (firebaseInitialized && auth) {
       onAuthStateChanged(auth, (usr) => {
         user = usr;
         if (user) {
-          console.log("Authenticated user:", user.uid);
+          console.log("User session active:", user.uid);
         }
       });
-      initAuth();
     }
 
     // --- IndexedDB の初期設定 (録画データの自律的な保存と上書き用) ---
@@ -550,14 +566,14 @@
       });
     };
 
-    // 録画データ（Blob）の保存
+    // 録画データの保存
     const saveRecording = async (blob) => {
       if (!idb) await initIndexedDB();
       const id = 'rec_' + Date.now();
       const timestamp = Date.now();
       const size = blob.size;
 
-      // 現在の総容量を確認し、容量オーバーなら古い順に自動削除
+      // 容量上限を確認し、自動上書きを実行
       await enforceStorageLimit(size);
 
       return new Promise((resolve, reject) => {
@@ -589,7 +605,7 @@
       });
     };
 
-    // 特定の録画を削除
+    // 録画を削除
     window.deleteRecording = async (id) => {
       if (!idb) await initIndexedDB();
       return new Promise((resolve, reject) => {
@@ -629,7 +645,7 @@
       });
     };
 
-    // ストレージの進捗UI表示の更新
+    // ストレージ使用状況メーター更新
     const updateStorageIndicator = async () => {
       try {
         const list = await getAllRecordings();
@@ -731,7 +747,7 @@
       }
     };
 
-    // 録画再生モーダル起動
+    // 録画再生モーダル
     window.playVideo = async (id) => {
       if (!idb) await initIndexedDB();
       const transaction = idb.transaction([storeName], 'readonly');
@@ -766,7 +782,7 @@
       }
     };
 
-    // --- カメラズーム機能の実装 (CanvasトリミングによるWebRTC適合拡大配信) ---
+    // --- カメラズーム加工処理 (Canvas トリミング方式) ---
     const setupZoomProcessing = (videoEl, canvasEl) => {
       const ctx = canvasEl.getContext('2d');
       const fps = 30;
@@ -787,6 +803,7 @@
         const h = canvasEl.height;
 
         if (w > 0 && h > 0) {
+          // デジタルズーム演算
           const subW = w / zoomLevel;
           const subH = h / zoomLevel;
           const sx = (w - subW) / 2;
@@ -813,7 +830,7 @@
       if (monitorBadge) monitorBadge.innerText = `ZOOM: ${zoomLevel.toFixed(1)}x`;
     };
 
-    // --- 録画録音ロジック ---
+    // --- 自律録画・手動録画制御 ---
     const startLocalRecording = () => {
       if (isRecording) return;
       recordedChunks = [];
@@ -845,7 +862,7 @@
       mediaRecorder.onstop = async () => {
         const blob = new Blob(recordedChunks, { type: 'video/webm' });
         await saveRecording(blob);
-        window.showToast('自動ループストレージへ録画を保存しました。');
+        window.showToast('ループストレージへ録画ファイルを自動上書き保存しました。');
       };
 
       mediaRecorder.start();
@@ -878,28 +895,18 @@
       lucide.createIcons();
     };
 
-    const btnToggleRec = document.getElementById('btn-toggle-rec');
-    if (btnToggleRec) {
-      btnToggleRec.addEventListener('click', () => {
-        if (isRecording) {
-          stopLocalRecording();
-        } else {
-          startLocalRecording();
-        }
-      });
-    }
-
-    // --- ① カメラ配信モード開始処理 ---
+    // --- ① カメラ配信モードの開始 ---
     const startCameraMode = async (roomId) => {
       currentRole = 'camera';
       activeRoomId = roomId;
+      appliedCandidatesIndex = 0;
 
       screenSetup.classList.add('hidden');
       screenCamera.classList.remove('hidden');
       const displayId = document.getElementById('display-camera-room-id');
       if (displayId) displayId.innerText = roomId;
 
-      statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> 配信待機中 (ローカル)`;
+      statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> 配信待機中`;
       statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1.5";
 
       try {
@@ -917,7 +924,15 @@
           canvasStream = zoomCanvas.captureStream(30);
         }
 
+        // シグナリング方式の決定
         if (firebaseInitialized && db) {
+          // 認証が完了するのを完全に待つ (RULE 3)
+          await initAuth();
+          if (!user) {
+            startLocalSignalling(roomId);
+            return;
+          }
+
           const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId);
           await setDoc(roomRef, {
             createdAt: Date.now(),
@@ -928,14 +943,16 @@
             },
             offer: null,
             answer: null,
-            candidates: []
+            monitorCandidates: [],
+            cameraCandidates: []
           });
 
           listenToRemoteControls(roomId);
-          statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> 配信待機中 (クラウド同期中)`;
-          window.showToast("遠隔通信用ルームを作成しました。モニター端末を接続してください。");
+          statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> 接続待機中 (Cloud)`;
+          window.showToast("接続用クラウドサーバーへの登録が完了しました。モニターを接続してください。");
         } else {
-          window.showToast("安全テストモードで起動しました（カメラ機能・ローカル録画をお試しいただけます）");
+          // ローカルシグナリング(同一PC内タブテスト)の自動開始
+          startLocalSignalling(roomId);
         }
 
         await initIndexedDB();
@@ -944,7 +961,7 @@
 
       } catch (err) {
         console.error("Camera Init Error:", err);
-        window.showToast("カメラ/マイクの起動に失敗しました。利用許可を確認してください。");
+        window.showToast("カメラデバイスの初期化に失敗しました。カメラ・マイクへのアクセスをブラウザで許可してください。");
         stopCameraMode();
       }
     };
@@ -956,9 +973,14 @@
       }
       if (peerConnection) {
         peerConnection.close();
+        peerConnection = null;
       }
       if (dbUnsubscribe) {
         dbUnsubscribe();
+      }
+      if (localChannel) {
+        localChannel.close();
+        localChannel = null;
       }
 
       screenCamera.classList.add('hidden');
@@ -972,33 +994,36 @@
     const stopCameraBtn = document.getElementById('btn-stop-camera');
     if (stopCameraBtn) stopCameraBtn.addEventListener('click', stopCameraMode);
 
-    // --- ② モニター監視モード開始処理 ---
+
+    // --- ② モニター監視モードの開始 ---
     const startMonitorMode = async (roomId) => {
       currentRole = 'monitor';
       activeRoomId = roomId;
+      appliedCandidatesIndex = 0;
 
       screenSetup.classList.add('hidden');
       screenMonitor.classList.remove('hidden');
       const displayId = document.getElementById('display-monitor-room-id');
       if (displayId) displayId.innerText = roomId;
 
-      statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> モニタリング`;
-      statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5";
+      statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span> 接続構築中`;
+      statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 flex items-center gap-1.5";
 
       try {
         try {
           localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         } catch (e) {
-          console.log("Monitor mode started without mic input.");
+          console.warn("話しかけ用のローカルマイクが見つかりません。音声受信のみで開始します。");
           localStream = null;
         }
 
         if (firebaseInitialized && db) {
+          await initAuth();
           await initializePeerConnection(roomId);
           listenToRemoteControls(roomId);
-          window.showToast("カメラ端末への接続を開始します。");
+          window.showToast("見守りカメラへのクラウド接続を開始します...");
         } else {
-          window.showToast("安全テストモードで起動しました（遠隔連携にはFirebaseの設定が必要です）");
+          startLocalSignalling(roomId);
         }
       } catch (err) {
         console.error("Monitor Init Error:", err);
@@ -1013,9 +1038,14 @@
       }
       if (peerConnection) {
         peerConnection.close();
+        peerConnection = null;
       }
       if (dbUnsubscribe) {
         dbUnsubscribe();
+      }
+      if (localChannel) {
+        localChannel.close();
+        localChannel = null;
       }
 
       screenMonitor.classList.add('hidden');
@@ -1029,14 +1059,15 @@
     const stopMonitorBtn = document.getElementById('btn-stop-monitor');
     if (stopMonitorBtn) stopMonitorBtn.addEventListener('click', stopMonitorMode);
 
-    // --- WebRTC シグナリング ---
+
+    // --- WebRTC ピアコネクション＆クラウドシグナリング ---
     const initializePeerConnection = async (roomId) => {
       if (!firebaseInitialized || !db) return;
       peerConnection = new RTCPeerConnection(rtcConfig);
 
       if (localStream) {
         localStream.getTracks().forEach(track => {
-          track.enabled = false; // 最初はオフ
+          track.enabled = false; // 初期ミュート
           peerConnection.addTrack(track, localStream);
         });
       }
@@ -1045,20 +1076,23 @@
         const remoteVideo = document.getElementById('monitor-video');
         if (remoteVideo && event.streams[0]) {
           remoteVideo.srcObject = event.streams[0];
-          console.log("Remote live stream connected.");
+          console.log("Remote live stream received successfully.");
           document.getElementById('camera-status-connected')?.classList.remove('hidden');
+          statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 見守り中`;
+          statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5";
         }
       };
 
+      // モニター(Caller)のICE Candidateを「monitorCandidates」配列に登録
       peerConnection.onicecandidate = async (event) => {
         if (event.candidate) {
           const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId);
           const roomSnap = await getDoc(roomRef);
           if (roomSnap.exists()) {
             const data = roomSnap.data();
-            const candidates = data.candidates || [];
-            candidates.push(event.candidate.toJSON());
-            await updateDoc(roomRef, { candidates });
+            const monitorCandidates = data.monitorCandidates || [];
+            monitorCandidates.push(event.candidate.toJSON());
+            await updateDoc(roomRef, { monitorCandidates });
           }
         }
       };
@@ -1083,8 +1117,9 @@
         if (!snapshot.exists()) return;
         const data = snapshot.data();
 
-        // カメラ側処理
+        // ---------------- CAMERA MODE (受信側) ----------------
         if (currentRole === 'camera') {
+          // モニターからオファーがあった場合、アンサーを返す
           if (data.offer && !peerConnection) {
             peerConnection = new RTCPeerConnection(rtcConfig);
 
@@ -1095,12 +1130,13 @@
               localStream.getAudioTracks().forEach(track => peerConnection.addTrack(track, localStream));
             }
 
+            // カメラ側ICE Candidateを「cameraCandidates」へ追加
             peerConnection.onicecandidate = async (event) => {
               if (event.candidate) {
                 const snap = await getDoc(roomRef);
-                const candidates = snap.data().candidates || [];
-                candidates.push(event.candidate.toJSON());
-                await updateDoc(roomRef, { candidates });
+                const cameraCandidates = snap.data().cameraCandidates || [];
+                cameraCandidates.push(event.candidate.toJSON());
+                await updateDoc(roomRef, { cameraCandidates });
               }
             };
 
@@ -1116,21 +1152,30 @@
             });
 
             document.getElementById('camera-status-connected')?.classList.remove('hidden');
-            statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 接続完了`;
+            statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> モニター接続中`;
+            statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5";
           }
 
-          if (data.candidates && peerConnection) {
-            for (const cand of data.candidates) {
+          // モニター(Caller)側の候補を相手に登録 (インデックス管理で重複防止)
+          if (data.monitorCandidates && peerConnection) {
+            while (appliedCandidatesIndex < data.monitorCandidates.length) {
+              const candidateData = data.monitorCandidates[appliedCandidatesIndex];
               try {
-                await peerConnection.addIceCandidate(new RTCIceCandidate(cand));
-              } catch (e) {}
+                await peerConnection.addIceCandidate(new RTCIceCandidate(candidateData));
+                console.log("Successfully added monitor candidate:", appliedCandidatesIndex);
+              } catch (e) {
+                console.warn("Failed to add monitor candidate:", e);
+              }
+              appliedCandidatesIndex++;
             }
           }
 
+          // リモートズームの適用
           if (data.controls && typeof data.controls.zoom !== 'undefined') {
             applyZoom(data.controls.zoom);
           }
 
+          // リモート録画の適用
           if (data.controls && typeof data.controls.isRecording !== 'undefined') {
             if (data.controls.isRecording && !isRecording) {
               startLocalRecording();
@@ -1140,21 +1185,29 @@
           }
         }
 
-        // モニター側処理
+        // ---------------- MONITOR MODE (送信側) ----------------
         if (currentRole === 'monitor') {
+          // カメラからアンサーが届いた場合、適用する
           if (data.answer && peerConnection && !peerConnection.currentRemoteDescription) {
             await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-            statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 接続中`;
+            console.log("Remote WebRTC answer applied.");
           }
 
-          if (data.candidates && peerConnection) {
-            for (const cand of data.candidates) {
+          // カメラ(Callee)側の候補をこちらに登録 (インデックス管理で重複防止)
+          if (data.cameraCandidates && peerConnection) {
+            while (appliedCandidatesIndex < data.cameraCandidates.length) {
+              const candidateData = data.cameraCandidates[appliedCandidatesIndex];
               try {
-                await peerConnection.addIceCandidate(new RTCIceCandidate(cand));
-              } catch (e) {}
+                await peerConnection.addIceCandidate(new RTCIceCandidate(candidateData));
+                console.log("Successfully added camera candidate:", appliedCandidatesIndex);
+              } catch (e) {
+                console.warn("Failed to add camera candidate:", e);
+              }
+              appliedCandidatesIndex++;
             }
           }
 
+          // カメラ側の遠隔録画状況を同期
           const recStatusEl = document.getElementById('remote-rec-status');
           const remoteRecBtn = document.getElementById('btn-remote-rec-toggle');
 
@@ -1176,11 +1229,122 @@
           }
         }
       }, (error) => {
-        console.error("Firestore synchronisation error:", error);
+        console.error("Firestore sync listener error:", error);
       });
     };
 
-    // --- 各種操作ボタン登録 (安全なDOM確認付き) ---
+
+    // --- 📡 ローカルテスト用シグナリング通信 (BroadcastChannel) ---
+    // Firebase設定をまだしていない段階や、同一端末の複数タブで安全に動作確認・P2P通信を可能にする強力なエミュレータ。
+    const startLocalSignalling = (roomId) => {
+      localChannel = new BroadcastChannel(`petcam-channel-${roomId}`);
+      console.log(`P2P Local Signaling Channel active: petcam-channel-${roomId}`);
+      
+      window.showToast("安全テスト・ローカルP2Pモードで接続を開始しました。同一PC内の別タブまたは近接ネットワークにて同じ接続コードでアクセスしてください。");
+
+      if (currentRole === 'camera') {
+        statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-teal-500 animate-pulse"></span> ローカル配信待機中`;
+        statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center gap-1.5";
+      }
+
+      // シグナリング情報の受信
+      localChannel.onmessage = async (event) => {
+        const { sender, type, data } = event.data;
+        if (sender === currentRole) return; // 自分が送信したものは無視
+
+        if (currentRole === 'camera') {
+          if (type === 'offer') {
+            peerConnection = new RTCPeerConnection(rtcConfig);
+            
+            if (canvasStream) {
+              canvasStream.getVideoTracks().forEach(track => peerConnection.addTrack(track, canvasStream));
+            }
+            if (localStream) {
+              localStream.getAudioTracks().forEach(track => peerConnection.addTrack(track, localStream));
+            }
+
+            peerConnection.onicecandidate = (e) => {
+              if (e.candidate) {
+                localChannel.postMessage({ sender: 'camera', type: 'candidate', data: e.candidate.toJSON() });
+              }
+            };
+
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data));
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+
+            localChannel.postMessage({ sender: 'camera', type: 'answer', data: { type: answer.type, sdp: answer.sdp } });
+            
+            document.getElementById('camera-status-connected')?.classList.remove('hidden');
+            statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 接続中 (Local P2P)`;
+          }
+
+          if (type === 'candidate' && peerConnection) {
+            try {
+              await peerConnection.addIceCandidate(new RTCIceCandidate(data));
+            } catch (e) {}
+          }
+
+          if (type === 'control') {
+            if (data.zoom !== undefined) applyZoom(data.zoom);
+            if (data.isRecording !== undefined) {
+              if (data.isRecording && !isRecording) startLocalRecording();
+              else if (!data.isRecording && isRecording) stopLocalRecording();
+            }
+          }
+        }
+
+        if (currentRole === 'monitor') {
+          if (type === 'answer' && peerConnection) {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data));
+            console.log("Local answer accepted and WebRTC connection ready.");
+          }
+
+          if (type === 'candidate' && peerConnection) {
+            try {
+              await peerConnection.addIceCandidate(new RTCIceCandidate(data));
+            } catch (e) {}
+          }
+        }
+      };
+
+      // モニター側の接続準備開始
+      if (currentRole === 'monitor') {
+        setTimeout(async () => {
+          peerConnection = new RTCPeerConnection(rtcConfig);
+
+          if (localStream) {
+            localStream.getTracks().forEach(track => {
+              track.enabled = false;
+              peerConnection.addTrack(track, localStream);
+            });
+          }
+
+          peerConnection.ontrack = (event) => {
+            const remoteVideo = document.getElementById('monitor-video');
+            if (remoteVideo && event.streams[0]) {
+              remoteVideo.srcObject = event.streams[0];
+              statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 見守り中 (Local)`;
+              statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5";
+            }
+          };
+
+          peerConnection.onicecandidate = (e) => {
+            if (e.candidate) {
+              localChannel.postMessage({ sender: 'monitor', type: 'candidate', data: e.candidate.toJSON() });
+            }
+          };
+
+          const offer = await peerConnection.createOffer();
+          await peerConnection.setLocalDescription(offer);
+
+          localChannel.postMessage({ sender: 'monitor', type: 'offer', data: { type: offer.type, sdp: offer.sdp } });
+        }, 800);
+      }
+    };
+
+
+    // --- 各種UI操作系のバインディング・イベントハンドラー ---
     if (btnSelectCamera) {
       btnSelectCamera.addEventListener('click', () => {
         const roomId = inputRoomId ? inputRoomId.value.trim() : '';
@@ -1203,7 +1367,7 @@
       });
     }
 
-    // ズームスライダー
+    // モニター端: 遠隔ズーム
     const sliderZoom = document.getElementById('slider-zoom');
     if (sliderZoom) {
       sliderZoom.addEventListener('input', async (e) => {
@@ -1217,21 +1381,24 @@
             await updateDoc(roomRef, {
               'controls.zoom': parseFloat(val)
             });
+          } else if (localChannel) {
+            // ローカルテスト用通信
+            localChannel.postMessage({ sender: 'monitor', type: 'control', data: { zoom: parseFloat(val) } });
+            applyZoom(val);
           } else {
-            // デモモード：自身のズーム倍率インジケータのみ動かす
             applyZoom(val);
           }
         }
       });
     }
 
-    // 話しかける
+    // 話しかける (マイク送信)
     const btnMonitorMic = document.getElementById('btn-monitor-mic-toggle');
     let monitorMicOn = false;
     if (btnMonitorMic) {
       btnMonitorMic.addEventListener('click', () => {
         if (!localStream) {
-          window.showToast("マイクへのアクセス権限がない、またはマイクがありません。");
+          window.showToast("マイクへのアクセス権限がない、または有効なマイクがありません。");
           return;
         }
         monitorMicOn = !monitorMicOn;
@@ -1240,7 +1407,7 @@
         if (monitorMicOn) {
           btnMonitorMic.className = "bg-brand-600 hover:bg-brand-500 p-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 text-white transition-colors";
           btnMonitorMic.innerHTML = `<i id="icon-monitor-mic" data-lucide="mic" class="w-4 h-4"></i> 話しかけ中...`;
-          window.showToast("マイクがONです。カメラ端にあなたの声が伝わります。");
+          window.showToast("マイクON：こちらからの音声がカメラ側スピーカーから再生されます。");
         } else {
           btnMonitorMic.className = "bg-slate-700 hover:bg-slate-600 p-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 text-slate-300 transition-colors";
           btnMonitorMic.innerHTML = `<i id="icon-monitor-mic" data-lucide="mic-off" class="w-4 h-4"></i> 話しかける`;
@@ -1249,7 +1416,7 @@
       });
     }
 
-    // 声を聴く
+    // ペットの声を聴く (スピーカー受信)
     const btnMonitorSpeaker = document.getElementById('btn-monitor-speaker-toggle');
     let monitorSpeakerOn = true;
     if (btnMonitorSpeaker) {
@@ -1273,7 +1440,7 @@
       });
     }
 
-    // 遠隔録画指示
+    // モニター端: 遠隔録画開始・停止
     const btnRemoteRec = document.getElementById('btn-remote-rec-toggle');
     if (btnRemoteRec) {
       btnRemoteRec.addEventListener('click', async () => {
@@ -1290,13 +1457,22 @@
             });
             window.showToast(nextRecState ? "カメラ端末に録画開始を指示しました。" : "カメラ端末に録画停止を指示しました。");
           }
-        } else {
-          window.showToast("デモモード：遠隔録画の切り替えは動作しません（Firebase接続時に有効になります）");
+        } else if (localChannel) {
+          // ローカルテスト時の遠隔録画シミュレート
+          isRecording = !isRecording;
+          localChannel.postMessage({ sender: 'monitor', type: 'control', data: { isRecording } });
+          const recStatusEl = document.getElementById('remote-rec-status');
+          if (recStatusEl) {
+            recStatusEl.innerText = isRecording ? "録画中" : "停止中";
+            recStatusEl.className = isRecording ? "px-2 py-0.5 text-xs font-bold rounded bg-red-600/20 text-red-400 border border-red-500/20" : "px-2 py-0.5 text-xs font-bold rounded bg-slate-700 text-slate-400";
+          }
+          btnRemoteRec.innerHTML = isRecording ? `<i data-lucide="square" class="w-4 h-4 fill-white text-red-500"></i> 遠隔録画を停止` : `<i data-lucide="circle" class="w-4 h-4 fill-white"></i> 遠隔録画スタート`;
+          lucide.createIcons();
         }
       });
     }
 
-    // カメラマイク消音
+    // カメラ端: マイクミュート
     const btnCameraMic = document.getElementById('btn-camera-mic-toggle');
     if (btnCameraMic) {
       btnCameraMic.addEventListener('click', () => {
@@ -1327,7 +1503,6 @@
 
   </script>
   <script>
-    // アイコンの初期起動
     lucide.createIcons();
   </script>
 </body>
