@@ -70,8 +70,8 @@
         </div>
       </div>
       <div class="flex items-center space-x-2">
-        <span id="connection-status-badge" class="px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-800 text-slate-400 flex items-center gap-1.5">
-          <span class="w-2 h-2 rounded-full bg-slate-500"></span> 未接続
+        <span id="connection-status-badge" class="px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-800 text-slate-400 flex items-center gap-1.5 animate-pulse">
+          <span class="w-2 h-2 rounded-full bg-slate-500"></span> 準備中...
         </span>
       </div>
     </div>
@@ -84,7 +84,7 @@
     <div id="toast" class="hidden fixed bottom-6 right-6 z-50 max-w-sm bg-slate-800 border-l-4 border-brand-500 p-4 rounded shadow-2xl transition-all duration-300 flex items-start gap-3">
       <div class="text-brand-400"><i data-lucide="info" class="w-5 h-5"></i></div>
       <div class="flex-1">
-        <p id="toast-message" class="text-sm font-medium"></p>
+        <p id="toast-message" class="text-sm font-medium whitespace-pre-line"></p>
       </div>
       <button onclick="hideToast()" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-4 h-4"></i></button>
     </div>
@@ -216,7 +216,7 @@
 
           <!-- 設定項目: 保存上限 -->
           <div class="space-y-2">
-            <label class="block text-xs text-slate-400 font-semibold">最大保存容量の指定</label>
+            <label class="block text-xs text-slate-400 font-semibold">最大保存容量 of 指定</label>
             <div class="grid grid-cols-3 gap-2">
               <button onclick="setStorageLimit(50)" id="btn-limit-50" class="storage-limit-btn bg-slate-700 border border-slate-600 py-2 rounded-xl text-sm font-semibold hover:bg-slate-600 transition-colors">50 MB</button>
               <button onclick="setStorageLimit(100)" id="btn-limit-100" class="storage-limit-btn bg-slate-700 border border-slate-600 py-2 rounded-xl text-sm font-semibold hover:bg-slate-600 transition-colors">100 MB</button>
@@ -412,19 +412,45 @@
     // --- 各種変数定義・初期設定 ---
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'petcam-link-app';
     const firebaseConfig = {
-    apiKey: "AIzaSyCk2JY_lKdk6653fhGPuoSC_zLbpXNYvSI",
-    authDomain: "petcamera-f44aa.firebaseapp.com",
-    projectId: "petcamera-f44aa",
-    storageBucket: "petcamera-f44aa.firebasestorage.app",
-    messagingSenderId: "563268558823",
-    appId: "1:563268558823:web:b3cfde8c8b729716de6742",
-    measurementId: "G-6HR2ZXL3LZ"
-  };
+      apiKey: "AIzaSyCk2JY_lKdk6653fhGPuoSC_zLbpXNYvSI",
+      authDomain: "petcamera-f44aa.firebaseapp.com",
+      projectId: "petcamera-f44aa",
+      storageBucket: "petcamera-f44aa.firebasestorage.app",
+      messagingSenderId: "563268558823",
+      appId: "1:563268558823:web:b3cfde8c8b729716de6742",
+      measurementId: "G-6HR2ZXL3LZ"
+    };
 
     // Firebaseの安全な初期化
     let app, auth, db;
     let firebaseInitialized = false;
     let authPromise = null;
+
+    // --- UI要素取得 ---
+    const screenSetup = document.getElementById('screen-setup');
+    const screenCamera = document.getElementById('screen-camera');
+    const screenMonitor = document.getElementById('screen-monitor');
+    const inputRoomId = document.getElementById('input-room-id');
+    const btnGenerateRoom = document.getElementById('btn-generate-room');
+    const btnSelectCamera = document.getElementById('btn-select-camera');
+    const btnSelectMonitor = document.getElementById('btn-select-monitor');
+    const statusBadge = document.getElementById('connection-status-badge');
+
+    // 共通トースト
+    window.showToast = function(message, type = 'info') {
+      const toast = document.getElementById('toast');
+      const toastMsg = document.getElementById('toast-message');
+      if (toastMsg && toast) {
+        toastMsg.innerText = message;
+        toast.classList.remove('hidden');
+        setTimeout(() => { window.hideToast(); }, 7000); // じっくり読めるように7秒に延長
+      }
+    };
+
+    window.hideToast = function() {
+      const toast = document.getElementById('toast');
+      if (toast) toast.classList.add('hidden');
+    };
 
     try {
       if (firebaseConfig && firebaseConfig.apiKey && firebaseConfig.apiKey !== "") {
@@ -433,11 +459,14 @@
         db = getFirestore(app);
         firebaseInitialized = true;
         console.log("Firebase initialized successfully.");
+        updateBadge("offline", "未接続 (クラウド準備完了)");
       } else {
         console.warn("Firebase config elements are missing or empty. Running in Local Signalling mode.");
+        updateBadge("offline", "ローカルテスト専用モード");
       }
     } catch (e) {
       console.error("Firebase initialisation failed:", e);
+      updateBadge("error", "Firebase初期化エラー");
     }
 
     let user = null;
@@ -464,40 +493,36 @@
     // ローカルタブ間・安全テスト用シグナリング通信 (BroadcastChannel)
     let localChannel = null;
 
-    // WebRTC 設定 (STUNサーバー)
+    // WebRTC 設定 (強力な公共STUNサーバーリスト)
     const rtcConfig = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' }
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
       ]
     };
 
-    // --- UI要素取得 ---
-    const screenSetup = document.getElementById('screen-setup');
-    const screenCamera = document.getElementById('screen-camera');
-    const screenMonitor = document.getElementById('screen-monitor');
-    const inputRoomId = document.getElementById('input-room-id');
-    const btnGenerateRoom = document.getElementById('btn-generate-room');
-    const btnSelectCamera = document.getElementById('btn-select-camera');
-    const btnSelectMonitor = document.getElementById('btn-select-monitor');
-    const statusBadge = document.getElementById('connection-status-badge');
-
-    // 共通トースト
-    window.showToast = function(message, type = 'info') {
-      const toast = document.getElementById('toast');
-      const toastMsg = document.getElementById('toast-message');
-      if (toastMsg && toast) {
-        toastMsg.innerText = message;
-        toast.classList.remove('hidden');
-        setTimeout(() => { window.hideToast(); }, 5000);
+    // 状態バッジ表示切り替え
+    function updateBadge(state, text) {
+      if (!statusBadge) return;
+      statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full flex items-center gap-1.5";
+      
+      if (state === "active") {
+        statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> ${text}`;
+        statusBadge.classList.add("bg-emerald-500/10", "text-emerald-400", "border", "border-emerald-500/20");
+      } else if (state === "pending") {
+        statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> ${text}`;
+        statusBadge.classList.add("bg-amber-500/10", "text-amber-400", "border", "border-amber-500/20");
+      } else if (state === "error") {
+        statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span> ${text}`;
+        statusBadge.classList.add("bg-rose-500/10", "text-rose-400", "border", "border-rose-500/20");
+      } else {
+        statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-slate-500"></span> ${text}`;
+        statusBadge.classList.add("bg-slate-800", "text-slate-400");
       }
-    };
-
-    window.hideToast = function() {
-      const toast = document.getElementById('toast');
-      if (toast) toast.classList.add('hidden');
-    };
+    }
 
     // ランダムなルームIDを生成
     if (btnGenerateRoom) {
@@ -510,25 +535,32 @@
       });
     }
 
-    // --- Firebase 認証同期 (RULE 3 - 徹底保証) ---
+    // --- Firebase 認証同期 (RULE 3 - クラウドエラーをUI通知化) ---
     const initAuth = () => {
       if (!firebaseInitialized || !auth) return Promise.resolve(null);
       if (authPromise) return authPromise;
 
-      authPromise = new Promise(async (resolve, reject) => {
+      authPromise = new Promise(async (resolve) => {
         try {
+          let cred;
           if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-            const cred = await signInWithCustomToken(auth, __initial_auth_token);
-            user = cred.user;
+            cred = await signInWithCustomToken(auth, __initial_auth_token);
           } else {
-            const cred = await signInAnonymously(auth);
-            user = cred.user;
+            cred = await signInAnonymously(auth);
           }
+          user = cred.user;
           console.log("Firebase Auth established:", user.uid);
           resolve(user);
         } catch (err) {
-          console.error("Auth Error", err);
-          window.showToast("認証に失敗しました。ローカルモードで続行します。");
+          console.error("Auth Error:", err);
+          let friendlyMsg = "⚠️ クラウド接続認証に失敗しました。\n";
+          if (err.code === "auth/operation-not-allowed") {
+            friendlyMsg += "【重要】Firebaseコンソールの『Authentication』➜『Sign-in method』で【匿名 (Anonymous) 認証】を有効にしてください。";
+          } else {
+            friendlyMsg += `原因: ${err.message}`;
+          }
+          window.showToast(friendlyMsg);
+          updateBadge("error", "認証エラー（要設定）");
           resolve(null);
         }
       });
@@ -906,8 +938,7 @@
       const displayId = document.getElementById('display-camera-room-id');
       if (displayId) displayId.innerText = roomId;
 
-      statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> 配信待機中`;
-      statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1.5";
+      updateBadge("pending", "配信認証中...");
 
       try {
         localStream = await navigator.mediaDevices.getUserMedia({
@@ -924,34 +955,47 @@
           canvasStream = zoomCanvas.captureStream(30);
         }
 
-        // シグナリング方式の決定
+        // シグナリング方式の決定とFirestore登録のガード
         if (firebaseInitialized && db) {
-          // 認証が完了するのを完全に待つ (RULE 3)
           await initAuth();
           if (!user) {
+            console.warn("Auth failed. Falling back to local signaling mode.");
             startLocalSignalling(roomId);
             return;
           }
 
-          const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId);
-          await setDoc(roomRef, {
-            createdAt: Date.now(),
-            controls: {
-              zoom: 1.0,
-              micEnabled: true,
-              isRecording: false
-            },
-            offer: null,
-            answer: null,
-            monitorCandidates: [],
-            cameraCandidates: []
-          });
+          try {
+            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId);
+            await setDoc(roomRef, {
+              createdAt: Date.now(),
+              controls: {
+                zoom: 1.0,
+                micEnabled: true,
+                isRecording: false
+              },
+              offer: null,
+              answer: null,
+              monitorCandidates: [],
+              cameraCandidates: []
+            });
 
-          listenToRemoteControls(roomId);
-          statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> 接続待機中 (Cloud)`;
-          window.showToast("接続用クラウドサーバーへの登録が完了しました。モニターを接続してください。");
+            listenToRemoteControls(roomId);
+            updateBadge("pending", "カメラ待機中 (Cloud)");
+            window.showToast("お留守番カメラの準備ができました。モニター端末を接続してください。");
+          } catch (dbErr) {
+            console.error("Database initialization failed:", dbErr);
+            let friendlyError = "⚠️ クラウドデータベースへの登録に失敗しました。\n";
+            if (dbErr.code === "permission-denied") {
+              friendlyError += "【重要】FirebaseコンソールのCloud Firestoreルールを『テストモードで開始（全員の読み書き許可）』に変更してください。";
+            } else {
+              friendlyError += `原因: ${dbErr.message}`;
+            }
+            window.showToast(friendlyError);
+            updateBadge("error", "DB接続エラー");
+            // 失敗時はローカル通信にフォールバック
+            startLocalSignalling(roomId);
+          }
         } else {
-          // ローカルシグナリング(同一PC内タブテスト)の自動開始
           startLocalSignalling(roomId);
         }
 
@@ -961,7 +1005,7 @@
 
       } catch (err) {
         console.error("Camera Init Error:", err);
-        window.showToast("カメラデバイスの初期化に失敗しました。カメラ・マイクへのアクセスをブラウザで許可してください。");
+        window.showToast("カメラデバイスの初期化に失敗しました。スマホのアウトカメラやマイクの権限をブラウザに許可してください。");
         stopCameraMode();
       }
     };
@@ -986,8 +1030,7 @@
       screenCamera.classList.add('hidden');
       screenSetup.classList.remove('hidden');
 
-      statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-slate-500"></span> 未接続`;
-      statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-800 text-slate-400 flex items-center gap-1.5";
+      updateBadge("offline", "未接続 (クラウド準備完了)");
       currentRole = null;
     };
 
@@ -1006,8 +1049,7 @@
       const displayId = document.getElementById('display-monitor-room-id');
       if (displayId) displayId.innerText = roomId;
 
-      statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span> 接続構築中`;
-      statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 flex items-center gap-1.5";
+      updateBadge("pending", "接続試行中...");
 
       try {
         try {
@@ -1019,15 +1061,27 @@
 
         if (firebaseInitialized && db) {
           await initAuth();
-          await initializePeerConnection(roomId);
-          listenToRemoteControls(roomId);
-          window.showToast("見守りカメラへのクラウド接続を開始します...");
+          if (!user) {
+            startLocalSignalling(roomId);
+            return;
+          }
+          
+          try {
+            await initializePeerConnection(roomId);
+            listenToRemoteControls(roomId);
+            window.showToast("カメラ端末へのクラウド経由での接続を開始しました...");
+          } catch (dbErr) {
+            console.error("Monitor signalling database error:", dbErr);
+            window.showToast("クラウドデータベース経由での接続確立に失敗しました。Firestoreのセキュリティルールをご確認ください。");
+            updateBadge("error", "DB接続エラー");
+            startLocalSignalling(roomId);
+          }
         } else {
           startLocalSignalling(roomId);
         }
       } catch (err) {
         console.error("Monitor Init Error:", err);
-        window.showToast("モニター接続に失敗しました。");
+        window.showToast("モニター接続に失敗しました。ネットワーク状況を確認してください。");
         stopMonitorMode();
       }
     };
@@ -1051,8 +1105,7 @@
       screenMonitor.classList.add('hidden');
       screenSetup.classList.remove('hidden');
 
-      statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-slate-500"></span> 未接続`;
-      statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-800 text-slate-400 flex items-center gap-1.5";
+      updateBadge("offline", "未接続 (クラウド準備完了)");
       currentRole = null;
     };
 
@@ -1078,8 +1131,7 @@
           remoteVideo.srcObject = event.streams[0];
           console.log("Remote live stream received successfully.");
           document.getElementById('camera-status-connected')?.classList.remove('hidden');
-          statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 見守り中`;
-          statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5";
+          updateBadge("active", "見守り中 (LIVE)");
         }
       };
 
@@ -1152,8 +1204,7 @@
             });
 
             document.getElementById('camera-status-connected')?.classList.remove('hidden');
-            statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> モニター接続中`;
-            statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5";
+            updateBadge("active", "モニターと同期中");
           }
 
           // モニター(Caller)側の候補を相手に登録 (インデックス管理で重複防止)
@@ -1230,6 +1281,14 @@
         }
       }, (error) => {
         console.error("Firestore sync listener error:", error);
+        let friendlyError = "⚠️ クラウドとの通信が切断されました。\n";
+        if (error.code === "permission-denied") {
+          friendlyError += "【重要】Firestoreの読み書き権限が拒否されています。Firebaseセキュリティルールが『テストモード』になっているか、日付期限が切れていないか確認してください。";
+        } else {
+          friendlyError += `原因: ${error.message}`;
+        }
+        window.showToast(friendlyError);
+        updateBadge("error", "通信エラー");
       });
     };
 
@@ -1240,11 +1299,10 @@
       localChannel = new BroadcastChannel(`petcam-channel-${roomId}`);
       console.log(`P2P Local Signaling Channel active: petcam-channel-${roomId}`);
       
-      window.showToast("安全テスト・ローカルP2Pモードで接続を開始しました。同一PC内の別タブまたは近接ネットワークにて同じ接続コードでアクセスしてください。");
+      window.showToast("【安全テスト用・ローカルP2Pモード】で接続を模擬開始しました。同一PC・スマホ内の別タブに『同じ接続コード』を入力してテストしてください。\n※クラウド接続にエラーが出たため、別スマホ同士の長距離通信はできません。");
 
       if (currentRole === 'camera') {
-        statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-teal-500 animate-pulse"></span> ローカル配信待機中`;
-        statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center gap-1.5";
+        updateBadge("pending", "ローカル配信待機中");
       }
 
       // シグナリング情報の受信
@@ -1276,7 +1334,7 @@
             localChannel.postMessage({ sender: 'camera', type: 'answer', data: { type: answer.type, sdp: answer.sdp } });
             
             document.getElementById('camera-status-connected')?.classList.remove('hidden');
-            statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 接続中 (Local P2P)`;
+            updateBadge("active", "接続完了 (Local P2P)");
           }
 
           if (type === 'candidate' && peerConnection) {
@@ -1324,8 +1382,7 @@
             const remoteVideo = document.getElementById('monitor-video');
             if (remoteVideo && event.streams[0]) {
               remoteVideo.srcObject = event.streams[0];
-              statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 見守り中 (Local)`;
-              statusBadge.className = "px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5";
+              updateBadge("active", "見守り中 (Local)");
             }
           };
 
@@ -1376,7 +1433,7 @@
         if (zoomValDisp) zoomValDisp.innerText = `${parseFloat(val).toFixed(1)} x`;
 
         if (currentRole === 'monitor') {
-          if (firebaseInitialized && db && activeRoomId) {
+          if (firebaseInitialized && db && activeRoomId && user) {
             const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', activeRoomId);
             await updateDoc(roomRef, {
               'controls.zoom': parseFloat(val)
@@ -1446,7 +1503,7 @@
       btnRemoteRec.addEventListener('click', async () => {
         if (currentRole !== 'monitor') return;
 
-        if (firebaseInitialized && db && activeRoomId) {
+        if (firebaseInitialized && db && activeRoomId && user) {
           const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', activeRoomId);
           const snap = await getDoc(roomRef);
           if (snap.exists()) {
