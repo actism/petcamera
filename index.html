@@ -188,8 +188,8 @@
               <span id="indicator-zoom" class="font-bold text-brand-400">1.0x</span>
             </div>
             <div class="flex items-center gap-2">
-              <span class="text-slate-400">マイク配信:</span>
-              <span id="indicator-mic" class="font-bold text-emerald-400">有効</span>
+              <span class="text-slate-400">映像送出状態:</span>
+              <span id="camera-track-status" class="font-bold text-emerald-400 text-[10px]">待機中</span>
             </div>
           </div>
 
@@ -286,7 +286,7 @@
       <div class="lg:col-span-2 space-y-4">
         <div class="relative bg-black rounded-2xl overflow-hidden aspect-video shadow-2xl border border-slate-800 flex items-center justify-center">
           <!-- WebRTC受信映像 -->
-          <video id="monitor-video" autoplay playsinline class="w-full h-full object-cover bg-slate-950"></video>
+          <video id="monitor-video" autoplay playsinline class="w-full h-full object-cover bg-slate-950" poster="https://placehold.co/1280x720/0f172a/64748b?text=Connecting..."></video>
 
           <!-- 接続状況インジケータ -->
           <div class="absolute top-4 left-4 flex gap-2">
@@ -838,41 +838,43 @@
 
     // --- カメラズーム加工処理 (Canvas トリミング方式) ---
     const setupZoomProcessing = (videoEl, canvasEl) => {
-      const ctx = canvasEl.getContext('2d');
+      const ctx = canvasEl.getContext('2d', { alpha: false });
       const fps = 30;
+      const trackStatus = document.getElementById('camera-track-status');
 
       const processFrame = () => {
         if (!currentRole || currentRole !== 'camera') return;
-        if (videoEl.paused || videoEl.ended) {
-          requestAnimationFrame(processFrame);
-          return;
+        
+        // ビデオが準備できていない場合はスキップするが、ループは止めない
+        if (videoEl.readyState >= 2) {
+          if (canvasEl.width !== videoEl.videoWidth && videoEl.videoWidth > 0) {
+            canvasEl.width = videoEl.videoWidth;
+            canvasEl.height = videoEl.videoHeight;
+          }
+
+          const w = canvasEl.width;
+          const h = canvasEl.height;
+
+          if (w > 0 && h > 0) {
+            const subW = w / zoomLevel;
+            const subH = h / zoomLevel;
+            const sx = (w - subW) / 2;
+            const sy = (h - subH) / 2;
+
+            ctx.drawImage(videoEl, sx, sy, subW, subH, 0, 0, w, h);
+            if (trackStatus && trackStatus.innerText !== "送出中") {
+              trackStatus.innerText = "映像送出中";
+              trackStatus.className = "font-bold text-emerald-400";
+            }
+          }
         }
-
-        if (canvasEl.width !== videoEl.videoWidth && videoEl.videoWidth > 0) {
-          canvasEl.width = videoEl.videoWidth;
-          canvasEl.height = videoEl.videoHeight;
-        }
-
-        const w = canvasEl.width;
-        const h = canvasEl.height;
-
-        if (w > 0 && h > 0) {
-          // デジタルズーム演算
-          const subW = w / zoomLevel;
-          const subH = h / zoomLevel;
-          const sx = (w - subW) / 2;
-          const sy = (h - subH) / 2;
-
-          ctx.clearRect(0, 0, w, h);
-          ctx.drawImage(videoEl, sx, sy, subW, subH, 0, 0, w, h);
-        }
-
+        
+        // 1/30秒後に再描画
         setTimeout(processFrame, 1000 / fps);
       };
 
-      videoEl.addEventListener('play', () => {
-        processFrame();
-      });
+      // 強制的にループを開始
+      processFrame();
     };
 
     const applyZoom = (val) => {
@@ -969,11 +971,16 @@
         });
 
         const previewEl = document.getElementById('camera-preview');
-        if (previewEl) previewEl.srcObject = localStream;
+        if (previewEl) {
+          previewEl.srcObject = localStream;
+          // スマホでの自動再生を確実にする
+          previewEl.onloadedmetadata = () => previewEl.play().catch(e => console.log("Auto-play blocked", e));
+        }
 
         const zoomCanvas = document.getElementById('camera-zoom-canvas');
         if (zoomCanvas && previewEl) {
           setupZoomProcessing(previewEl, zoomCanvas);
+          // Canvasからストリームを生成（30FPS固定）
           canvasStream = zoomCanvas.captureStream(30);
         }
 
@@ -1194,10 +1201,21 @@
       peerConnection.ontrack = (event) => {
         const remoteVideo = document.getElementById('monitor-video');
         if (remoteVideo && event.streams[0]) {
+          console.log("Remote track detected:", event.track.kind);
           remoteVideo.srcObject = event.streams[0];
-          console.log("Remote live stream received successfully.");
+          
+          // 受信側で確実に再生を開始させる（iOS/Android対策）
+          remoteVideo.onloadedmetadata = () => {
+            remoteVideo.play().then(() => {
+              console.log("Remote video playing automatically.");
+              updateBadge("active", "見守り中 (LIVE)");
+            }).catch(err => {
+              console.warn("Manual play required:", err);
+              window.showToast("映像をタップして再生してください");
+            });
+          };
+          
           document.getElementById('camera-status-connected')?.classList.remove('hidden');
-          updateBadge("active", "見守り中 (LIVE)");
         }
       };
 
