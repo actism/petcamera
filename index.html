@@ -4,41 +4,23 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PetCam Link - スマホをペットカメラに</title>
-  <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
       theme: {
         extend: {
           colors: {
-            brand: {
-              50: '#f0fdfa',
-              100: '#ccfbf1',
-              500: '#14b8a6',
-              600: '#0d9488',
-              700: '#0f766e',
-              900: '#115e59',
-            },
-            darkbg: {
-              DEFAULT: '#0f172a',
-              card: '#1e293b',
-              input: '#334155'
-            }
+            brand: { 50: '#f0fdfa', 100: '#ccfbf1', 500: '#14b8a6', 600: '#0d9488', 700: '#0f766e', 900: '#115e59' },
+            darkbg: { DEFAULT: '#0f172a', card: '#1e293b', input: '#334155' }
           }
         }
       }
     }
   </script>
-  <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
   <style>
-    @keyframes pulse-red {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
-    .animate-pulse-red {
-      animation: pulse-red 1.5s infinite;
-    }
+    @keyframes pulse-red { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .animate-pulse-red { animation: pulse-red 1.5s infinite; }
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: #1e293b; }
     ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
@@ -53,14 +35,11 @@
           <i data-lucide="camera" class="w-6 h-6"></i>
         </div>
         <div>
-          <h1 class="text-xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-brand-400 to-emerald-300">
-            PetCam Link
-          </h1>
+          <h1 class="text-xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-brand-400 to-emerald-300">PetCam Link</h1>
           <p class="text-xs text-slate-400">お留守番のペットを見守り</p>
         </div>
       </div>
       <div class="flex items-center space-x-2">
-        <!-- 初期状態を「準備中」から「待機中」に変更 -->
         <span id="connection-status-badge" class="px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-800 text-slate-400 flex items-center gap-1.5">
           <span class="w-2 h-2 rounded-full bg-slate-500"></span> IDを入力してください
         </span>
@@ -124,6 +103,7 @@
             <button id="btn-stop-camera" class="bg-rose-600/20 hover:bg-rose-600 text-rose-200 px-5 py-2.5 rounded-xl font-semibold transition-all flex items-center gap-2"><i data-lucide="log-out" class="w-4 h-4"></i> 配信終了</button>
         </div>
       </div>
+      <!-- 録画設定 (省略せず実装) -->
       <div class="bg-darkbg-card rounded-2xl p-6 border border-slate-800 space-y-4">
         <h3 class="text-lg font-bold text-white flex items-center gap-2"><i data-lucide="database" class="text-amber-400 w-5 h-5"></i> 自律ループ録画</h3>
         <div class="space-y-1.5">
@@ -203,7 +183,8 @@
       b.className = `px-2.5 py-1 text-xs font-semibold rounded-full flex items-center gap-1.5 ${state === 'active' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-400'}`;
     }
 
-    // --- 描画ループ (ズーム処理用) ---
+    // --- STREAMING_CHUNK:Implementing draw loop... ---
+    // 描画ループ (ズーム処理用)
     const startZoomLoop = (video, canvas) => {
       const ctx = canvas.getContext('2d', { alpha: false });
       const draw = () => {
@@ -263,7 +244,8 @@
       if (stream) stream.getTracks().forEach(tr => peerConnection.addTrack(tr, stream));
     };
 
-    // --- モード開始: カメラ ---
+    // --- STREAMING_CHUNK:Implementing Camera logic... ---
+    // モード開始: カメラ
     const startCamera = async (roomId) => {
       currentRole = 'camera'; activeRoomId = roomId;
       document.getElementById('screen-setup').classList.add('hidden');
@@ -308,7 +290,8 @@
       } catch (err) { window.showToast("カメラ起動エラー: " + err.message); }
     };
 
-    // --- モード開始: モニター ---
+    // --- STREAMING_CHUNK:Implementing Monitor logic... ---
+    // モード開始: モニター
     const startMonitor = async (roomId) => {
       currentRole = 'monitor'; activeRoomId = roomId;
       document.getElementById('screen-setup').classList.add('hidden');
@@ -343,7 +326,8 @@
       }
     };
 
-    // --- 初期化実行 ---
+    // --- STREAMING_CHUNK:Setting up app initialization... ---
+    // 初期化実行
     const initApp = async () => {
       // 1. Firebase初期化を非同期で開始（失敗しても次に進む）
       try {
