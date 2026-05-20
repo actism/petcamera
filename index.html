@@ -89,6 +89,24 @@
       <button onclick="hideToast()" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-4 h-4"></i></button>
     </div>
 
+    <!-- Firebase エラー案内警告パネル (エラー発生時に表示) -->
+    <div id="firebase-warning-card" class="hidden max-w-2xl mx-auto mt-4 mb-6 bg-amber-950/40 border border-amber-500/30 p-5 rounded-2xl flex items-start gap-4 shadow-xl">
+      <div class="bg-amber-500/10 text-amber-400 p-2 rounded-xl shrink-0">
+        <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+      </div>
+      <div class="space-y-2">
+        <h4 class="text-sm font-bold text-amber-200">Firebaseのクラウド機能が制限されています</h4>
+        <p id="firebase-warning-detail" class="text-xs text-slate-300 leading-relaxed">
+          クラウド接続に失敗したため、別々のスマホ間でのリアルタイム通信が利用できません。同じPCの「別タブ同士」でのみ通信が可能です。
+        </p>
+        <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800 mt-2 text-[11px] text-slate-400 font-mono space-y-1">
+          <p class="font-bold text-amber-400/90">🔧 解決するには：</p>
+          <p>1. Firebaseコンソールの『Authentication』➜『Sign-in method』で「匿名 (Anonymous) 認証」を有効にしてください。</p>
+          <p>2. 『Firestore Database』の「ルール」タブで、テストモードでの書き込みが許可されているか確認してください。</p>
+        </div>
+      </div>
+    </div>
+
     <!-- 1. モード選択画面 -->
     <section id="screen-setup" class="my-auto py-8">
       <div class="max-w-xl mx-auto text-center space-y-8">
@@ -411,7 +429,9 @@
 
     // --- 各種変数定義・初期設定 ---
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'petcam-link-app';
-    const firebaseConfig = {
+    
+    // 【環境の自動提供設定を最優先、ない場合はフォールバック】
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
       apiKey: "AIzaSyCk2JY_lKdk6653fhGPuoSC_zLbpXNYvSI",
       authDomain: "petcamera-f44aa.firebaseapp.com",
       projectId: "petcamera-f44aa",
@@ -435,6 +455,8 @@
     const btnSelectCamera = document.getElementById('btn-select-camera');
     const btnSelectMonitor = document.getElementById('btn-select-monitor');
     const statusBadge = document.getElementById('connection-status-badge');
+    const warningCard = document.getElementById('firebase-warning-card');
+    const warningDetail = document.getElementById('firebase-warning-detail');
 
     // 共通トースト
     window.showToast = function(message, type = 'info') {
@@ -467,6 +489,7 @@
     } catch (e) {
       console.error("Firebase initialisation failed:", e);
       updateBadge("error", "Firebase初期化エラー");
+      showFirebaseWarning("Firebaseの初期化に失敗しました。APIキーまたはネットワークを確認してください。");
     }
 
     let user = null;
@@ -524,15 +547,12 @@
       }
     }
 
-    // ランダムなルームIDを生成
-    if (btnGenerateRoom) {
-      btnGenerateRoom.addEventListener('click', () => {
-        const randomId = 'room-' + Math.random().toString(36).substring(2, 7);
-        if (inputRoomId) {
-          inputRoomId.value = randomId;
-          window.showToast('接続コードを生成しました！');
-        }
-      });
+    // ユーザーにFirebaseの設定エラーを視覚的に警告する
+    function showFirebaseWarning(detailMessage) {
+      if (warningCard && warningDetail) {
+        warningDetail.innerText = detailMessage;
+        warningCard.classList.remove('hidden');
+      }
     }
 
     // --- Firebase 認証同期 (RULE 3 - クラウドエラーをUI通知化) ---
@@ -553,13 +573,17 @@
           resolve(user);
         } catch (err) {
           console.error("Auth Error:", err);
-          let friendlyMsg = "⚠️ クラウド接続認証に失敗しました。\n";
-          if (err.code === "auth/operation-not-allowed") {
-            friendlyMsg += "【重要】Firebaseコンソールの『Authentication』➜『Sign-in method』で【匿名 (Anonymous) 認証】を有効にしてください。";
+          let friendlyMsg = "⚠️ クラウド接続認証に失敗しました。";
+          let warningMsg = "クラウド接続認証に失敗したため、別々のスマホ間での通信がブロックされています。\n";
+          if (err.code === "auth/operation-not-allowed" || err.message.includes("not allowed")) {
+            friendlyMsg += "\nFirebaseコンソールで『匿名 (Anonymous) 認証』を有効にしてください。";
+            warningMsg += "【原因】Firebaseコンソールの Authentication ➜ Sign-in method で「匿名 (Anonymous)」設定がオフになっています。有効化してください。";
           } else {
-            friendlyMsg += `原因: ${err.message}`;
+            friendlyMsg += `\n原因: ${err.message}`;
+            warningMsg += `【原因】${err.message}`;
           }
           window.showToast(friendlyMsg);
+          showFirebaseWarning(warningMsg);
           updateBadge("error", "認証エラー（要設定）");
           resolve(null);
         }
@@ -576,7 +600,7 @@
       });
     }
 
-    // --- IndexedDB の初期設定 (録画データの自律的な保存と上書き用) ---
+    // --- IndexedDB の初期設定 ---
     let idb = null;
     const dbName = 'PetCamRecordingsDB';
     const storeName = 'recordings';
@@ -605,7 +629,6 @@
       const timestamp = Date.now();
       const size = blob.size;
 
-      // 容量上限を確認し、自動上書きを実行
       await enforceStorageLimit(size);
 
       return new Promise((resolve, reject) => {
@@ -653,7 +676,7 @@
       });
     };
 
-    // 保存容量制限の適用（FIFO: 古い順削除の上書き）
+    // 保存容量制限の適用
     const enforceStorageLimit = async (newBlobSize) => {
       let list = await getAllRecordings();
       let totalSize = list.reduce((acc, cur) => acc + cur.size, 0);
@@ -665,7 +688,6 @@
         const oldest = list.shift();
         await deleteRecordingDirect(oldest.id);
         totalSize -= oldest.size;
-        console.log(`Auto deleted oldest file for storage space: ${oldest.id}`);
       }
     };
 
@@ -984,15 +1006,18 @@
             window.showToast("お留守番カメラの準備ができました。モニター端末を接続してください。");
           } catch (dbErr) {
             console.error("Database initialization failed:", dbErr);
-            let friendlyError = "⚠️ クラウドデータベースへの登録に失敗しました。\n";
+            let friendlyError = "⚠️ クラウドデータベースへの登録に失敗しました。";
+            let warningMsg = "Firestoreデータベースへの接続制限が発生しています。\n";
             if (dbErr.code === "permission-denied") {
-              friendlyError += "【重要】FirebaseコンソールのCloud Firestoreルールを『テストモードで開始（全員の読み書き許可）』に変更してください。";
+              friendlyError += "\nFirestoreのセキュリティルールを『テストモード』に変更してください。";
+              warningMsg += "【原因】Firestoreセキュリティルールで読み書きがブロックされています。テストモードに変更、または閲覧期間の期限切れがないか確認してください。";
             } else {
-              friendlyError += `原因: ${dbErr.message}`;
+              friendlyError += `\n原因: ${dbErr.message}`;
+              warningMsg += `【原因】${dbErr.message}`;
             }
             window.showToast(friendlyError);
+            showFirebaseWarning(warningMsg);
             updateBadge("error", "DB接続エラー");
-            // 失敗時はローカル通信にフォールバック
             startLocalSignalling(roomId);
           }
         } else {
@@ -1049,7 +1074,7 @@
       const displayId = document.getElementById('display-monitor-room-id');
       if (displayId) displayId.innerText = roomId;
 
-      updateBadge("pending", "接続試行中...");
+      updateBadge("pending", "接続準備中...");
 
       try {
         try {
@@ -1060,19 +1085,60 @@
         }
 
         if (firebaseInitialized && db) {
+          // (RULE 3) 認証の完了を厳密に待機
           await initAuth();
           if (!user) {
+            console.warn("Monitor auth failed. Fallback to local mode.");
             startLocalSignalling(roomId);
             return;
           }
           
+          const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomId);
+          
+          // 【重要】カメラ側がすでに部屋（ドキュメント）を作成しているか、接続前に事前検証
           try {
+            const roomSnap = await getDoc(roomRef);
+            if (!roomSnap.exists()) {
+              // 部屋がない = カメラがまだ起動していない
+              window.showToast("⚠️ カメラがまだ配信を開始していません。\n先に「ペット前のカメラ端末」で、同じ接続コードを入れて【① カメラとして使う（配信）】をスタートさせてから、モニターを開始してください。");
+              updateBadge("pending", "カメラ起動待ち");
+              
+              // 5秒間隔でカメラの起動を自動再検出するリスナーを貼って待機
+              let checkInterval = setInterval(async () => {
+                if (currentRole !== 'monitor') {
+                  clearInterval(checkInterval);
+                  return;
+                }
+                const retrySnap = await getDoc(roomRef);
+                if (retrySnap.exists()) {
+                  clearInterval(checkInterval);
+                  window.showToast("カメラの起動を確認しました！接続を確立します。");
+                  await initializePeerConnection(roomId);
+                  listenToRemoteControls(roomId);
+                }
+              }, 5000);
+              
+              return;
+            }
+
+            // ルームが既に存在する場合は、即座にWebRTC P2Pを確立
             await initializePeerConnection(roomId);
             listenToRemoteControls(roomId);
             window.showToast("カメラ端末へのクラウド経由での接続を開始しました...");
+
           } catch (dbErr) {
-            console.error("Monitor signalling database error:", dbErr);
-            window.showToast("クラウドデータベース経由での接続確立に失敗しました。Firestoreのセキュリティルールをご確認ください。");
+            console.error("Monitor connection check error:", dbErr);
+            let friendlyError = "⚠️ クラウドデータベースへの接続に失敗しました。";
+            let warningMsg = "Firestoreへの接続制限が発生しています。\n";
+            if (dbErr.code === "permission-denied") {
+              friendlyError += "\nFirestoreのセキュリティルールを『テストモード』に変更してください。";
+              warningMsg += "【原因】Firestoreセキュリティルールで、モニターからの読み込み/書き込みがブロックされています。";
+            } else {
+              friendlyError += `\n原因: ${dbErr.message}`;
+              warningMsg += `【原因】${dbErr.message}`;
+            }
+            window.showToast(friendlyError);
+            showFirebaseWarning(warningMsg);
             updateBadge("error", "DB接続エラー");
             startLocalSignalling(roomId);
           }
@@ -1081,7 +1147,7 @@
         }
       } catch (err) {
         console.error("Monitor Init Error:", err);
-        window.showToast("モニター接続に失敗しました。ネットワーク状況を確認してください。");
+        window.showToast("モニターの初期設定に失敗しました。ネットワーク状況を確認してください。");
         stopMonitorMode();
       }
     };
@@ -1294,7 +1360,6 @@
 
 
     // --- 📡 ローカルテスト用シグナリング通信 (BroadcastChannel) ---
-    // Firebase設定をまだしていない段階や、同一端末の複数タブで安全に動作確認・P2P通信を可能にする強力なエミュレータ。
     const startLocalSignalling = (roomId) => {
       localChannel = new BroadcastChannel(`petcam-channel-${roomId}`);
       console.log(`P2P Local Signaling Channel active: petcam-channel-${roomId}`);
